@@ -4,7 +4,7 @@ trial-run runs inside Claude Code on your machine. This page lists everything it
 
 ## What it sends, and when
 
-Only when a Bash command matches a charge (see "What goes to trial" in the README) and goes to trial. Ordinary commands, contempt and waived trials send nothing.
+Only when a Bash command matches a charge (see "What goes to trial" in the README) and goes to trial. Ordinary commands and contempt send nothing. The calls start as soon as court opens, so a trial you object to or skip has usually sent them already; pressing Object or Skip decides the case but does not recall a call in flight.
 
 For each trial, the mod makes three model calls through Claude Code's own model access (`$.model.complete`, model `haiku`): the prosecution, the defense, then the judge. Each call carries:
 
