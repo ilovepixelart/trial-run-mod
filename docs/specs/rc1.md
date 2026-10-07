@@ -12,7 +12,12 @@ trial-run puts risky shell commands on trial. Live runs show three gaps: an agen
 - **CONTEMPT-002** Identical means the same charged simple command after normalising whitespace and flag order of short flags (`rm -rf src` equals `rm -fr  src`). Check: `contempt.test.ts` normalisation table, both directions (different target paths are not contempt).
 - **CONTEMPT-003** The denial reason names contempt and the earlier case number, in character. Check: `verdict.test.ts` "contempt reason cites the case".
 - **CONTEMPT-004** The pane shows a CONTEMPT stamp in the guilty colour and files the case with verdict `contempt`; the docket counts it as a conviction. Check: `art.test.ts` widths for the contempt stamp; `docket.test.ts` "contempt counts as a conviction".
-- **CONTEMPT-005** Contempt memory is per session and cleared on `session.start`. Check: `court.test.ts` "a new session forgives contempt".
+- **CONTEMPT-005** Contempt memory is per conversation: cleared on `session.start` and on `classic.SessionStart` with `source` `clear`, `resume` or `fork` (`/clear`, `/resume` and `/branch` do not fire `session.start`). Check: `court.test.ts` "a new session forgives contempt" and "/clear forgives contempt".
+
+### Sessions and the store
+
+- **SESSION-001** Any `$.state` value seeded from `$.store` is reloaded on `classic.SessionStart` for `clear`, `resume` and `fork`, so the pane, band and docket never show "not in session" after `/clear`. Check: the kit's "test a drawing after /clear" pattern.
+- **STORE-001** Every docket write re-reads `cases` immediately before filing (never from a copy loaded earlier), because every session on the machine shares `$.store`. The remaining narrow race is documented as a known limitation. Check: `docket.test.ts` "a stale read does not lose a case".
 
 ### Sentencing
 
@@ -37,6 +42,23 @@ trial-run puts risky shell commands on trial. Live runs show three gaps: an agen
 - **PRECEDENT-004** Precedent does not expire, but it only applies when the current exhibits match the precedent case's exhibits on the facts that matter (upstream ahead count is zero in both, the target's tracked state is the same); otherwise the case goes to trial. The precedent case stores its exhibit summary. Check: `court.test.ts` "changed facts reopen the case".
 - **APPEAL-001** `/court appeal <context>` re-tries the most recent conviction with the added context as evidence and files the result as a new case marked appeal; a successful appeal clears contempt for that command. Check: `court.test.ts` appeal both outcomes.
 - **APPEAL-002** An appeal with no conviction to appeal says so and files nothing. Check: `court.test.ts` "nothing to appeal".
+
+### Showcase: what trial-run demonstrates about mods
+
+The court doubles as a reference mod: each clause uses a mods capability the court did not use before, in service of the story.
+
+- **SHOW-001 Verdict in the transcript.** A `ui.render` hook on the `ToolResult` site (and `ToolUse` where the denied call is drawn) adds a one-line stamp to the denied Bash row: `✕ GUILTY · case #0017` (or `✕ CONTEMPT · case #0018`), drawn by wrapping Claude Code's own tree, never replacing it. Rows for other tools and for commands that did not go to trial are untouched. Check: `transcript.test.ts` "a convicted call's row carries the stamp" and "an ordinary row is returned unchanged"; art widths at 80 and 120.
+- **SHOW-002 Court-aware Claude.** A `tool.describe` hook appends two sentences to the Bash tool description: risky commands stand trial, and stating the intent in the same message helps the defense. It changes only the Bash description, once per session, and stays under 200 characters added. Check: `describe.test.ts` "Bash description gains the notice", "other tools are untouched"; a live check that Claude states its intent before a risky command.
+- **SHOW-003 Settings in /config.** `userConfig` in plugin.json declares: `strictness` (`lenient`, `fair`, `hanging`; default `fair`), `sounds` (boolean, default true), `charges` (multiple, default every charge). `register(on, options)` reads them; strictness changes the judge's doctrine sentence only, never the decision mapping (a model's acquittal can still only defer); a charge switched off is never tried. Check: `register.test.ts` per option, and `claude plugin validate --strict` passes with `userConfig`.
+- **SHOW-004 Spinner.** A `ui.render` hook on the `Spinner` site shows the word `Deliberating` while a trial is in session, and leaves the spinner untouched otherwise. Check: `court.test.ts` "the spinner deliberates during a trial only".
+- **SHOW-005 Adjournment.** A `turn.complete` hook adds one line under the answer when the turn held at least one trial: `Court adjourned. 1 conviction, 1 acquittal this turn.` No line for a turn without trials. Check: `court.test.ts` both cases.
+- **SHOW-006 How it works.** `docs/how-it-works.md` explains each mods concept the court uses, why, and where in the code: the hooks module and `register(on, options)`; `tool.check` as middleware and why the court only tightens (`next(e)` first, then a stricter decision); `.catch` as the fail-closed path; render sites (`Pane`, `AbovePrompt`, `ToolResult`, `Spinner`) and `Client` modules for animation; `$.state` atoms declared in `types/index.d.ts`; `$.store` with its layout version; `$.model.complete`; `$.process.run` with an argv allowlist (exhibits); `userConfig`; tiers and how an organisation could seat the court with `prependPlugins`; testing with `claude plugin test` and the kit's mocks, and `claude plugin validate` as the access report. Pointers and constraints only, no pasted code beyond one-line signatures. Check: every symbol it names exists in the code (a grep per symbol, as REL-004 does for the README).
+
+Technique, from the official mods docs:
+
+- **SHOW-001 (technique)** Wrap, never replace: `await next(e)` inside a `Box` with the stamp line, at the `ToolResult` site keyed by the denied call's id (`e.requestId`); verify which event field carries that id in the build's types before relying on it.
+- **SHOW-004 (technique)** Change a detail: `next({ ...e, props: { ...e.props, word: 'Deliberating' } })`, keeping Claude Code's animation.
+- **SHOW-005 (scope)** Main conversation only: skip `turn.complete` events with `e.agentId` set, and turns with `e.isAborted`.
 
 ### Release
 
@@ -74,5 +96,6 @@ Desktop SVG rendering, sounds beyond the existing gavel, a public directory subm
 6. EXHIBIT-001, 002, 004 gatherer (pure argv plan plus a runner over `$.process.run`).
 7. EXHIBIT-003 evidence in prompts and pane; EXHIBIT-005 README.
 8. PRECEDENT-001 to 004.
-9. APPEAL-001, 002.
-10. REL-001 to 004, then live playground verification of every feature, then REL-006 recording after the usage banner clears, then REL-005 and REL-007 on the owner's go-ahead.
+9. APPEAL-001, 002, with CONTEMPT-005, SESSION-001 and STORE-001 before the features that depend on them.
+10. SHOW-003, SHOW-002, SHOW-001, SHOW-004, SHOW-005, then SHOW-006 last so it describes the finished code.
+11. REL-001 to 004, then live playground verification of every feature, then REL-006 recording after the usage banner clears, then REL-005 and REL-007 on the owner's go-ahead.
