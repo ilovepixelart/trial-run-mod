@@ -355,7 +355,10 @@ export const factsOf = (plan: readonly ExhibitQuery[], results: readonly Exhibit
     ignored: facts.ignoredIn,
     indexed: facts.indexed,
   }
-  const isEveryTargetRead = targets.every(one => readFor[one.kind]?.[one.target ?? ''] !== undefined)
+  const isEveryTargetRead = targets.every(one => {
+    const read = readFor[one.kind] ?? {}
+    return Object.hasOwn(read, one.target ?? '') && read[one.target ?? ''] !== undefined
+  })
   if (!isEveryTargetRead) {
     delete facts.tracked
     delete facts.untracked
@@ -528,7 +531,7 @@ export const exhibitLinesOf = (facts: Facts): string[] => {
 export const materialOf = (plan: readonly ExhibitQuery[], facts: Facts): MaterialFacts | undefined => {
   const asked = plan.filter(one => one.kind === 'behind' || one.kind === 'tracked')
   const isRead = (one: ExhibitQuery) =>
-    one.kind === 'behind' ? facts.behind !== undefined : one.target !== undefined && facts.tracked?.[one.target] !== undefined
+    one.kind === 'behind' ? facts.behind !== undefined : one.target !== undefined && Object.hasOwn(facts.tracked ?? {}, one.target) && facts.tracked?.[one.target] !== undefined
   const isPlaced = facts.top !== undefined && facts.prefix !== undefined && facts.branch !== undefined
   return asked.length > 0 && facts.isRepo === true && isPlaced && asked.every(isRead) && isEveryTargetClean(facts)
     ? materialFactsOf(facts)

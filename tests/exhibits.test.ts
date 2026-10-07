@@ -320,6 +320,30 @@ describe('exhibits', () => {
     })
   })
 
+  test('a target named like an Object.prototype member with no read result is unknown, not read', () => {
+    const here = { top: '/work/app', prefix: '', branch: 'main' }
+    for (const name of ['constructor', '__proto__', 'toString']) {
+      const plan = planOf(`rm -rf src ${name}`)
+      expect(plan.map(query => query.target), name).toEqual([undefined, 'src', 'src', name, name])
+      const facts = factsOf(plan, [ran(0, 'true\n/work/app\n\nmain\n'), ran(0, 'src/a\n'), ran(0, ''), ran(128), undefined])
+      expect(facts, name).toEqual({ isRepo: true, ...here })
+      expect(exhibitLinesOf(facts), name).toEqual([])
+      expect(materialOf(plan, facts), name).toBeUndefined()
+      expect(materialOf(plan, { isRepo: true, ...here, tracked: { src: true } }), name).toBeUndefined()
+    }
+  })
+
+  test('a target named like an Object.prototype member is a fact like any other once read', () => {
+    const plan = planOf('rm -rf __proto__')
+    const facts = factsOf(plan, [ran(0, 'true\n/work/app\n\nmain\n'), ran(1), ran(0, '__proto__/x\n')])
+    expect(Object.hasOwn(facts.tracked ?? {}, '__proto__')).toBe(true)
+    expect(exhibitLinesOf(facts)).toEqual([
+      'Exhibit A: __proto__ is not tracked by git, so history does not keep it.',
+      'Exhibit B: __proto__ holds 1 untracked file.',
+    ])
+    expect(materialOf(plan, facts)?.tracked?.['__proto__']).toBe(false)
+  })
+
   test('the repository, the directory within it and the branch are read with the first query', () => {
     const plan = planOf('rm -rf build')
     expect(factsOf(plan, [ran(0, 'true\n/work/app\nsub/\nmain\n../.git/index\n'), ran(1), ran(0, ''), ran(0, ''), ran(0, '')])).toEqual({
