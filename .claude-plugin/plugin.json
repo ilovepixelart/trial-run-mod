@@ -1,0 +1,10 @@
+{
+  "name": "trial-run",
+  "version": "0.1.0",
+  "description": "Puts risky shell commands on trial: a prosecutor, a defense and a judge argue in a pane, and the verdict decides whether the command runs.",
+  "types": "./types/index.d.ts",
+  "author": {
+    "name": "ilovepixelart",
+    "email": "ilovepixelart@users.noreply.github.com"
+  }
+}

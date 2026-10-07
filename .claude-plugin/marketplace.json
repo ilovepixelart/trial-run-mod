@@ -1,0 +1,16 @@
+{
+  "name": "trial-run-mod",
+  "description": "Claude Code mods by ilovepixelart: trial-run, where risky shell commands stand trial before they run.",
+  "owner": {
+    "name": "ilovepixelart",
+    "email": "ilovepixelart@users.noreply.github.com"
+  },
+  "plugins": [
+    {
+      "name": "trial-run",
+      "source": "./",
+      "description": "Puts risky shell commands on trial: a prosecutor, a defense and a judge argue in a pane, and the verdict decides whether the command runs.",
+      "version": "0.1.0"
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+{
+  "description": "Courtroom for risky Bash commands: tool.check trials, the court pane and band, the gavel",
+  "modules": ["./register.tsx"]
+}
