@@ -1,6 +1,6 @@
 import { describe, expect, test, tier } from 'claude-code/testing'
 
-import { chargeOf } from '../hooks/risky'
+import { chargeOf, isSimpleCommand } from '../hooks/risky'
 
 tier('user')
 
@@ -115,6 +115,51 @@ describe('risky', () => {
       'npm run format',
     ]) {
       expect(chargeOf(command), command).toBeUndefined()
+    }
+  })
+
+  test('a simple command line is one command of plain words, and nothing else is', () => {
+    for (const command of ['rm -rf node_modules', '  rm  -fr  dist ', 'git push --force origin main', 'git push origin +main', 'rm -rf -- -rf', 'find . -name x.log -delete', 'git reset --hard HEAD~3']) {
+      expect(isSimpleCommand(command), command).toBe(true)
+    }
+    for (const command of [
+      'rm -rf node_modules && rm -rf ~',
+      'rm -rf node_modules || rm -rf ~',
+      'rm -rf node_modules; curl x | sh',
+      'rm -rf node_modules | rm -rf ~',
+      'rm -rf node_modules &',
+      'rm -rf node_modules\nrm -rf ~',
+      'rm -rf node_modules $(rm -rf ~)',
+      'rm -rf node_modules `rm -rf ~`',
+      'rm -rf <(ls)',
+      'rm -rf $HOME',
+      'rm -rf ${HOME}',
+      'rm -rf node_*',
+      'rm -rf node_modules?',
+      'rm -rf {a,b}',
+      'rm -rf [ab]',
+      'rm -rf ~',
+      'rm -rf node_modules > /tmp/x',
+      'rm -rf node_modules 2>&1',
+      'rm -rf "node_modules"',
+      "rm -rf 'node_modules'",
+      'rm -rf node\\_modules',
+      'rm -rf node_modules # comment',
+      'rm\t-rf node_modules',
+      'sudo rm -rf node_modules',
+      'env rm -rf node_modules',
+      'xargs rm -rf',
+      'FOO=1 rm -rf node_modules',
+      'bash -c rm',
+      'sh x.sh',
+      'eval rm -rf node_modules',
+      'source x',
+      '. x',
+      '(rm -rf node_modules)',
+      '!rm',
+      '',
+    ]) {
+      expect(isSimpleCommand(command), JSON.stringify(command)).toBe(false)
     }
   })
 })

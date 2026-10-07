@@ -10,7 +10,7 @@ import type { CaseRecord } from './docket'
 import { gaugeOf } from './gauge'
 import { caseNumberOf, caseRowOf, docketLayoutOf, headerLinesOf, lineOf, rapSheetLayoutOf, wrapOf } from './layout'
 import { DELIBERATION_MS, LANDING_MS, RISE_MS, paceOf } from './pace'
-import { chargeOf } from './risky'
+import { chargeOf, isSimpleCommand } from './risky'
 import { sentenceFor } from './sentence'
 import { GAVEL, SCALES, segmentsOf, stampFor } from './stamp'
 import { speechRequestOf, spokenOf, testimonyOf, tightOf, tryCase } from './trial'
@@ -427,7 +427,7 @@ export const register: Register = on => {
     const never = new Promise<Ruling>(() => undefined)
 
     // what the docket keeps for precedent, once the exhibits are in
-    let filed: Pick<CaseRecord, 'root' | 'key' | 'facts' | 'precedent'> = { key: contemptKey }
+    let filed: Pick<CaseRecord, 'root' | 'facts' | 'precedent'> = {}
     const exhibitsFrom = async () => {
       const facts = await factsFrom($, command)
       const exhibits = exhibitLinesOf(facts)
@@ -436,8 +436,10 @@ export const register: Register = on => {
     }
     const heard = async (): Promise<Ruling> => {
       const [testimony, { exhibits, facts }, root] = await Promise.all([testimonyFrom($), exhibitsFrom(), rootFrom($)])
-      filed = { ...filed, root, facts }
-      const bound = root === undefined ? undefined : precedentOf(history, { key: contemptKey, root, facts })
+      // only a simple command line sets precedent: a compound line's
+      // acquittal says nothing about its charged part alone
+      filed = isSimpleCommand(command) ? { root, facts } : {}
+      const bound = root === undefined ? undefined : precedentOf(history, { command, root, facts })
       if (bound !== undefined) {
         // acquitted here before on the same facts: no model call
         filed = { ...filed, precedent: bound.number }

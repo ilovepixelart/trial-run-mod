@@ -97,7 +97,7 @@ Retry a convicted command in the same session and the court does not sit again: 
 
 ## Precedent
 
-A command the court acquitted before in the same project is acquitted again by precedent as soon as the exhibits are in, with no model call, citing the case: `Acquitted by precedent: case #0004 heard this command here on the same facts.` Same command means the contempt rule above. Precedent binds only in the project root it was set in, only while the latest ruling on that command there is the acquittal (a later conviction overturns it), and only on the same facts: every target tracked or untracked as before, and no upstream commits the branch lacks, then or now. Any change in those exhibits sends the command back to trial. A command whose normalised form is longer than 80 characters sets no precedent. Precedent is an acquittal like any other: it defers to your rules beneath.
+A command the court acquitted before in the same project is acquitted again by precedent as soon as the exhibits are in, with no model call, citing the case: `Acquitted by precedent: case #0004 heard this command here on the same facts.` Precedent only ever applies to a whole command line that is one simple command of plain words: no `&&`, `||`, `;`, `|`, `&` or newline, no substitution, variable, glob, brace or tilde expansion, no redirection, quoting or escape, no env assignment, wrapper (`sudo`, `env`, `xargs`, ...) or nested shell. The whole line must match, spacing and short-flag order aside; any other line goes to trial, and the acquittal of a compound line sets no precedent for its parts. Contempt is wider on purpose: it matches the charged part of any line, because it can only deny. Precedent binds only in the project root it was set in, only while the latest ruling on that command there is the acquittal (a later conviction overturns it), and only on the same facts: every target tracked or untracked as before, and no upstream commits the branch lacks, then or now. Any change in those exhibits sends the command back to trial. A line of 80 characters or more sets no precedent. Precedent is an acquittal like any other: it defers to your rules beneath.
 
 ## On a narrow terminal
 
@@ -107,7 +107,7 @@ Claude Code only draws a pane a plugin opens on its own from 144 columns (110 on
 
 `/court docket` opens the court's record: how many cases it has heard, the conviction rate, the six latest cases with their verdicts, a strip of the last thirty verdicts (`✕` guilty or contempt, `·` acquitted, `?` mistrial), and Claude's rap sheet, the charges it has been convicted of most. Most wanted is usually force push. Considered armed and helpful.
 
-The docket keeps the latest 200 cases (the command, cut to 80 characters, its charge, the verdict and when; for [precedent](#precedent), the project root, the command's normalised form and the facts that matter). A mistrial is on the record but is no ruling, so it does not count toward the conviction rate; contempt counts as a conviction.
+The docket keeps the latest 200 cases (the command, cut to 80 characters, its charge, the verdict and when; for [precedent](#precedent), the project root and the facts that matter). A mistrial is on the record but is no ruling, so it does not count toward the conviction rate; contempt counts as a conviction.
 
 ## Easy on the eyes
 

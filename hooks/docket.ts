@@ -1,5 +1,7 @@
+import { contemptKeyOf } from './contempt'
 import { isSameMaterial } from './exhibits'
 import type { MaterialFacts } from './exhibits'
+import { isSimpleCommand } from './risky'
 
 /**
  * One case the court has heard, as the docket keeps it.
@@ -14,12 +16,11 @@ export type CaseRecord = {
    */
   at: number
   /**
-   * Since layout 2: the project root the case was heard in, the command's
-   * contempt key (absent when too long to keep whole) and the facts that
-   * matter for precedent. A case filed before has none and sets no precedent.
+   * Since layout 2, for a simple command line only: the project root the
+   * case was heard in and the facts that matter for precedent. A case
+   * without them sets no precedent.
    */
   root?: string
-  key?: string
   facts?: MaterialFacts
   /**
    * The case an acquittal by precedent cites.
@@ -80,13 +81,7 @@ const RAP_SHEET = 3
  */
 export const fileCase = (history: readonly CaseRecord[], filing: Omit<CaseRecord, 'number'>): CaseRecord[] => {
   const number = (history.at(-1)?.number ?? 0) + 1
-  const { key, ...rest } = filing
-  const filed = {
-    ...rest,
-    number,
-    command: filing.command.slice(0, COMMAND_CHARS),
-    ...(key !== undefined && key.length <= COMMAND_CHARS ? { key } : {}),
-  }
+  const filed = { ...filing, number, command: filing.command.slice(0, COMMAND_CHARS) }
   return [...history, filed].slice(-DOCKET_CAP)
 }
 
@@ -101,19 +96,35 @@ export const nextCaseNumber = (history: readonly CaseRecord[]): number => (histo
 const isConviction = (c: CaseRecord) => c.verdict === 'guilty' || c.verdict === 'contempt'
 
 /**
- * The acquittal that binds a command as precedent: the latest ruling
- * (guilty, acquitted or contempt) on the same command in the same project
- * root, when it acquitted on the same facts that matter.
+ * Whether a case's command can stand for a whole command line: a simple
+ * one, kept whole (shorter than the cut), so its key is read off the
+ * command itself and nothing else a stored record claims.
+ */
+const isWholeSimple = (command: string) => command.length < COMMAND_CHARS && isSimpleCommand(command)
+
+/**
+ * The acquittal that binds a command line as precedent: the latest ruling
+ * (guilty, acquitted or contempt) on the same simple command line in the
+ * same project root, when it acquitted on the same facts that matter. A
+ * line that is not one simple command never has precedent.
  *
  * @param history the cases so far, oldest first
- * @param sought the command's contempt key, the project root and the facts now
+ * @param sought the whole command line, the project root and the facts now
  */
 export const precedentOf = (
   history: readonly CaseRecord[],
-  sought: { key: string; root: string; facts: MaterialFacts },
+  sought: { command: string; root: string; facts: MaterialFacts },
 ): CaseRecord | undefined => {
+  if (!isSimpleCommand(sought.command)) {
+    return undefined
+  }
+  const key = contemptKeyOf(sought.command)
   const last = history.findLast(
-    c => c.root === sought.root && c.key === sought.key && (c.verdict === 'acquitted' || isConviction(c)),
+    c =>
+      c.root === sought.root &&
+      (c.verdict === 'acquitted' || isConviction(c)) &&
+      isWholeSimple(c.command) &&
+      contemptKeyOf(c.command) === key,
   )
   return last?.verdict === 'acquitted' && isSameMaterial(last.facts ?? {}, sought.facts) ? last : undefined
 }
@@ -148,22 +159,58 @@ export const docketOf = (history: readonly CaseRecord[]): Docket => {
   }
 }
 
+const isObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+
 /**
- * The cases a stored value holds, or none when it is not a docket.
+ * Stored facts as far as they read as facts: a whole count, and tracked
+ * states that are booleans.
+ */
+const factsRead = (stored: unknown): MaterialFacts | undefined => {
+  if (!isObject(stored)) {
+    return undefined
+  }
+  const { behind, tracked } = stored
+  return {
+    ...(Number.isInteger(behind) && (behind as number) >= 0 ? { behind: behind as number } : {}),
+    ...(isObject(tracked)
+      ? { tracked: Object.fromEntries(Object.entries(tracked).filter(([, value]) => typeof value === 'boolean')) as Record<string, boolean> }
+      : {}),
+  }
+}
+
+/**
+ * The cases a stored value holds, or none when it is not a docket. The
+ * store is a shared file, so a record is read as untrusted: the fields
+ * this version knows, each of its type, and nothing else.
  */
 export const casesOf = (stored: unknown): CaseRecord[] =>
   Array.isArray(stored)
-    ? stored.filter(
-        (c): c is CaseRecord =>
-          typeof c === 'object' &&
-          c !== null &&
-          typeof c.number === 'number' &&
-          typeof c.command === 'string' &&
-          typeof c.charge === 'string' &&
-          (c.verdict === 'guilty' ||
-            c.verdict === 'acquitted' ||
-            c.verdict === 'hung' ||
-            c.verdict === 'waived' ||
-            c.verdict === 'contempt'),
-      )
+    ? stored
+        .filter(
+          (c): c is CaseRecord =>
+            typeof c === 'object' &&
+            c !== null &&
+            typeof c.number === 'number' &&
+            typeof c.command === 'string' &&
+            typeof c.charge === 'string' &&
+            (c.verdict === 'guilty' ||
+              c.verdict === 'acquitted' ||
+              c.verdict === 'hung' ||
+              c.verdict === 'waived' ||
+              c.verdict === 'contempt'),
+        )
+        .map(c => {
+          const facts = factsRead(c.facts)
+          return {
+            number: c.number,
+            command: c.command,
+            charge: c.charge,
+            verdict: c.verdict,
+            at: c.at,
+            ...(typeof c.root === 'string' ? { root: c.root } : {}),
+            ...(facts === undefined ? {} : { facts }),
+            ...(typeof c.precedent === 'number' ? { precedent: c.precedent } : {}),
+          }
+        })
     : []

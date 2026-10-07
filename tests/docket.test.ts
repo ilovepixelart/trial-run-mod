@@ -137,15 +137,15 @@ describe('docket', () => {
     const heard = (number: number, verdict: CaseRecord['verdict'], over: Partial<CaseRecord> = {}): CaseRecord => ({
       ...record(number, 'recursive delete', verdict, 'rm -rf dist'),
       root: '/work/app',
-      key: 'rm -rf dist',
       facts: { tracked: { dist: false } },
       ...over,
     })
-    const sought = { key: 'rm -rf dist', root: '/work/app', facts: { tracked: { dist: false } } }
+    const sought = { command: 'rm -rf dist', root: '/work/app', facts: { tracked: { dist: false } } }
 
-    test('an acquittal in the same project root on the same command is precedent', () => {
+    test('an acquittal in the same project root on the same command line is precedent', () => {
       expect(precedentOf([heard(1, 'acquitted')], sought)?.number).toBe(1)
-      expect(precedentOf([heard(1, 'acquitted')], { ...sought, key: 'rm -rf build' })).toBeUndefined()
+      expect(precedentOf([heard(1, 'acquitted')], { ...sought, command: 'rm  -fr dist' })?.number).toBe(1)
+      expect(precedentOf([heard(1, 'acquitted')], { ...sought, command: 'rm -rf build' })).toBeUndefined()
     })
 
     test('precedent is per project', () => {
@@ -167,22 +167,49 @@ describe('docket', () => {
     test('changed facts reopen the case: tracked state, or an upstream branch ahead', () => {
       expect(precedentOf([heard(1, 'acquitted')], { ...sought, facts: { tracked: { dist: true } } })).toBeUndefined()
       expect(precedentOf([heard(1, 'acquitted')], { ...sought, facts: {} })).toBeUndefined()
-      const push = { key: 'git push --force origin main', root: '/work/app' }
+      const push = { command: 'git push --force origin main', root: '/work/app' }
       const pushed = (behind: number | undefined) =>
-        heard(1, 'acquitted', { key: push.key, facts: behind === undefined ? {} : { behind } })
+        heard(1, 'acquitted', { command: push.command, facts: behind === undefined ? {} : { behind } })
       expect(precedentOf([pushed(0)], { ...push, facts: { behind: 0 } })?.number).toBe(1)
       expect(precedentOf([pushed(2)], { ...push, facts: { behind: 2 } })).toBeUndefined()
       expect(precedentOf([pushed(0)], { ...push, facts: { behind: 1 } })).toBeUndefined()
       expect(precedentOf([pushed(0)], { ...push, facts: {} })).toBeUndefined()
     })
 
-    test('a filed case keeps its root, facts and key, but no key too long to keep whole', () => {
-      const [kept] = fileCase([], { command: 'rm -rf dist', charge: 'c', verdict: 'acquitted', at: 1, root: '/r', key: 'rm -rf dist', facts: {} })
-      expect(kept).toEqual({ number: 1, command: 'rm -rf dist', charge: 'c', verdict: 'acquitted', at: 1, root: '/r', key: 'rm -rf dist', facts: {} })
+    test('only a simple command line sets or follows precedent', () => {
+      expect(precedentOf([heard(1, 'acquitted')], { ...sought, command: 'rm -rf dist && rm -rf ~' })).toBeUndefined()
+      // the key folds any whitespace, so a newline would otherwise match
+      expect(precedentOf([heard(1, 'acquitted')], { ...sought, command: 'rm -rf\ndist' })).toBeUndefined()
+      expect(precedentOf([heard(1, 'acquitted')], { ...sought, command: 'rm\t-rf dist' })).toBeUndefined()
+      const compound = heard(1, 'acquitted', { command: 'cd app && rm -rf dist' })
+      expect(precedentOf([compound], { ...sought, command: 'cd app && rm -rf dist' })).toBeUndefined()
+    })
+
+    test('a stored record is matched by the command it holds, never by a key it claims', () => {
+      const forged = { ...heard(1, 'acquitted', { command: 'rm -rf build' }), key: '-fr rm dist' } as CaseRecord
+      expect(precedentOf([forged], sought)).toBeUndefined()
+      expect(precedentOf([forged], { ...sought, command: 'rm -rf build' })?.number).toBe(1)
+    })
+
+    test('a command cut to fit the docket is never precedent', () => {
       const long = `rm -rf ${'x'.repeat(80)}`
-      const [cut] = fileCase([], { command: long, charge: 'c', verdict: 'acquitted', at: 1, root: '/r', key: long, facts: {} })
-      expect(cut?.key).toBeUndefined()
-      expect(precedentOf([{ ...cut!, command: long.slice(0, 80) }], { key: long.slice(0, 80), root: '/r', facts: {} })).toBeUndefined()
+      const [cut] = fileCase([], { command: long, charge: 'c', verdict: 'acquitted', at: 1, root: '/r', facts: {} })
+      expect(cut?.command).toHaveLength(80)
+      expect(precedentOf([cut!], { command: cut!.command, root: '/r', facts: {} })).toBeUndefined()
+      const [whole] = fileCase([], { command: 'rm -rf x', charge: 'c', verdict: 'acquitted', at: 1, root: '/r', facts: {} })
+      expect(precedentOf([whole!], { command: 'rm -rf x', root: '/r', facts: {} })?.number).toBe(1)
+    })
+
+    test('a stored record is read as untrusted: precedent fields of the wrong type are dropped', () => {
+      const [read] = casesOf([
+        { number: 1, command: 'rm -rf dist', charge: 'c', verdict: 'acquitted', at: 1, root: 7, facts: 'x', precedent: 'y' },
+      ])
+      expect(read).toEqual({ number: 1, command: 'rm -rf dist', charge: 'c', verdict: 'acquitted', at: 1 })
+      const [facts] = casesOf([
+        { number: 1, command: 'rm', charge: 'c', verdict: 'acquitted', at: 1, root: '/r', facts: { behind: '0', tracked: { a: 'yes', b: true } } },
+      ])
+      expect(facts?.root).toBe('/r')
+      expect(facts?.facts).toEqual({ tracked: { b: true } })
     })
   })
 })

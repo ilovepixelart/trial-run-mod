@@ -179,6 +179,39 @@ const innerScriptOf = (words: readonly string[]): string | undefined => {
 }
 
 /**
+ * Plain words only: no quote, escape, expansion, glob, brace, redirection,
+ * operator, comment or tab can appear, so the line runs what it spells.
+ */
+const PLAIN_LINE = /^[A-Za-z0-9_@%+=:,./~ -]+$/
+
+/**
+ * A `~` the shell expands: at the start of a word, or after `=` or `:`.
+ */
+const TILDE = /(^|[ =:])~/
+
+const NOT_SIMPLE_HEADS = new Set([...WRAPPERS, ...SHELLS, 'eval', 'source', '.'])
+
+/**
+ * Whether a whole command line is one simple command of plain words: no
+ * compound operator, substitution, variable, glob, brace or tilde
+ * expansion, redirection, quoting, env assignment, wrapper or nested shell.
+ * Anything the check cannot read as plain is not simple.
+ *
+ * @param command the Bash tool's `command`, as the model wrote it
+ */
+export const isSimpleCommand = (command: string): boolean => {
+  const words = wordsOf(command.trim())
+  const head = words[0]
+  return (
+    PLAIN_LINE.test(command) &&
+    !TILDE.test(command) &&
+    head !== undefined &&
+    !head.includes('=') &&
+    !NOT_SIMPLE_HEADS.has(head)
+  )
+}
+
+/**
  * The charge a shell command is tried on, or undefined to let it pass
  * without a trial.
  *
