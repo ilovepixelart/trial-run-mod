@@ -14,3 +14,7 @@ All notable changes to trial-run. Versions follow [Semantic Versioning](https://
 - Object (`o`) and Skip (`s`) during the deliberation; a skipped trial is filed as waived.
 - The saved docket records its layout (1); a docket saved by a newer version is never read or overwritten.
 - Requires Claude Code 2.1.287 or later.
+
+### Known limitations
+
+- Every session on the machine shares one docket and the store has no atomic update. The court re-reads the docket right before each filing, so a case another session filed earlier is kept, but one filed between that read and this session's write is lost.

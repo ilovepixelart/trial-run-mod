@@ -965,6 +965,22 @@ describe('court', () => {
     expect(await pane.find({ text: /^Update the mod; nothing was changed\.$/ })).toBeDefined()
   })
 
+  test('a stale read does not lose a case another session filed in between', async ($, on) => {
+    mock.clock(on)
+    const saved = memoryStore(on)
+    const other = { number: 2, command: 'rm -rf build', charge: 'recursive delete', verdict: 'acquitted', at: 5 }
+    seatCourt(on, verdictBench(GUILTY))
+
+    await $.tool.check(check('git push --force origin main'))
+    // another session on this machine files its case before this one files again
+    saved.set('cases', [...(saved.get('cases') as unknown[]), other])
+    await $.tool.check(check('rm -rf dist'))
+
+    const filed = saved.get('cases') as { number: number; command: string }[]
+    expect(filed.map(one => one.command)).toEqual(['git push --force origin main', 'rm -rf build', 'rm -rf dist'])
+    expect(filed.map(one => one.number)).toEqual([1, 2, 3])
+  })
+
   test('a docket with no layout reads as before', async ($, on) => {
     mock.clock(on)
     const saved = memoryStore(on, {
