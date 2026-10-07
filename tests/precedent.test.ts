@@ -464,6 +464,46 @@ describe('a later conviction overturns an acquittal, whatever line it came from'
     ])
   })
 
+  test('a compound conviction alone, with no contempt after it, sends the acquitted command to trial after /clear', async ($, on) => {
+    mock.clock(on)
+    const saved = memoryStore(on)
+    on('classic.SessionStart', () => ({}))
+    const seen = seatCourt(on, { reply: ruling([ACQUITTED, GUILTY, ACQUITTED]), git: healthy, root: () => '/work/app' })
+
+    await $.tool.check(check('rm -rf src'))
+    await $.tool.check(check('true && rm -rf src'))
+    await $.classic.SessionStart({ source: 'clear' })
+    await $.tool.check(check('rm -rf src'))
+
+    expect(seen.calls).toHaveLength(9)
+    const filed = saved.get('cases') as { command: string; verdict: string; precedent?: number }[]
+    expect(filed.map(one => [one.command, one.verdict, one.precedent])).toEqual([
+      ['rm -rf src', 'acquitted', undefined],
+      ['rm -rf src', 'guilty', undefined],
+      ['rm -rf src', 'acquitted', undefined],
+    ])
+  })
+
+  test('a conviction whose charged part is not a simple line still overturns the acquittal of its key', async ($, on) => {
+    mock.clock(on)
+    on('classic.SessionStart', () => ({}))
+    const seen = seatCourt(on, { reply: ruling([ACQUITTED, GUILTY, ACQUITTED]), git: healthy, root: () => '/work/app' })
+    const saved = memoryStore(on)
+
+    await $.tool.check(check('rm -rf src'))
+    await $.tool.check(check('rm\t-rf src'))
+    await $.classic.SessionStart({ source: 'clear' })
+    await $.tool.check(check('rm -rf src'))
+
+    expect(seen.calls).toHaveLength(9)
+    const filed = saved.get('cases') as { verdict: string; precedent?: number }[]
+    expect(filed.map(one => [one.verdict, one.precedent])).toEqual([
+      ['acquitted', undefined],
+      ['guilty', undefined],
+      ['acquitted', undefined],
+    ])
+  })
+
   test('a conviction older than the acquittal does not stop it binding', async ($, on) => {
     mock.clock(on)
     const saved = memoryStore(on)

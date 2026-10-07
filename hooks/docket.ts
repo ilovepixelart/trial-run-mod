@@ -110,10 +110,14 @@ const isWholeSimple = (command: string) => command.length < COMMAND_CHARS && isS
 
 /**
  * Whether a case is a ruling that bears on precedent in a project root:
- * an acquittal there, or a conviction there or of unknown root.
+ * an acquittal of a whole simple line there, or a conviction there or of
+ * unknown root. A conviction counts whatever its line, as contempt does:
+ * the docket holds its charged part, matched by key alone.
  */
 const isRulingIn = (c: CaseRecord, root: string) =>
-  c.verdict === 'acquitted' ? c.root === root : isConviction(c) && (c.root === undefined || c.root === root)
+  c.verdict === 'acquitted'
+    ? c.root === root && isWholeSimple(c.command)
+    : isConviction(c) && (c.root === undefined || c.root === root)
 
 /**
  * The acquittal that binds a command line as precedent: the latest ruling
@@ -135,9 +139,7 @@ export const precedentOf = (
   const key = contemptKeyOf(sought.command)
   const last = history.findLast(
     c =>
-      isRulingIn(c, sought.root) &&
-      isWholeSimple(c.command) &&
-      contemptKeyOf(c.command) === key,
+      isRulingIn(c, sought.root) && contemptKeyOf(c.command) === key,
   )
   return last?.verdict === 'acquitted' && isSameMaterial(last.facts ?? {}, sought.facts) ? last : undefined
 }
