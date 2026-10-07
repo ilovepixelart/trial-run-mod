@@ -3,6 +3,7 @@ import { describe, expect, mock, test, tier } from 'claude-code/testing'
 import { refused, said, seatCourt, verdictBench } from './fixtures/court'
 import { PALETTE, textsOf } from './fixtures/art'
 import { BAND_SITE, DOCKET_SITE, PANE_SITE } from './fixtures/sites'
+import { memoryStore } from './fixtures/store'
 
 tier('user')
 
@@ -870,6 +871,63 @@ describe('court', () => {
     expect(await pane.find({ text: /^THE COURT$/ })).toBeDefined()
     expect(await pane.find({ key: 'scales' })).toBeUndefined()
     expect(await pane.find({ key: 'gavel' })).toBeDefined()
+  })
+
+  test('a filed case writes the docket layout beside the cases', async ($, on) => {
+    mock.clock(on)
+    const saved = memoryStore(on)
+    seatCourt(on, verdictBench(GUILTY))
+
+    await $.tool.check(check('git push --force'))
+
+    expect(saved.get('layout')).toBe(1)
+    expect(saved.get('cases') as unknown[]).toHaveLength(1)
+  })
+
+  test('a docket saved by a newer trial-run is never read or overwritten, and trials still decide', async ($, on) => {
+    mock.clock(on)
+    const newer = [{ number: 41, command: 'future', charge: 'force push', verdict: 'guilty', at: 1, exhibits: {} }]
+    const saved = memoryStore(on, { layout: 2, cases: newer })
+    seatCourt(on, verdictBench(GUILTY))
+
+    const decided = await $.tool.check(check('git push --force origin main'))
+
+    expect(decided.decision).toBe('deny')
+    expect(saved.get('layout')).toBe(2)
+    expect(saved.get('cases')).toEqual(newer)
+    const pane = await $.ui.mount({ ...PANE_SITE, surface: 'terminal' })
+    expect(await pane.find({ text: /Case #0001/ })).toBeDefined()
+  })
+
+  test('/court docket says when the docket was saved by a newer trial-run', async ($, on) => {
+    mock.store(on, { layout: 2, cases: [] })
+    on('ui.open', () => ({ value: { isPlaced: true } }))
+
+    await $.command.run({
+      command: 'court',
+      args: 'docket',
+      origin: { kind: 'composer' },
+      presentation: { isFullscreen: true, columns: 160 },
+    })
+
+    const pane = await $.ui.mount({ ...DOCKET_SITE, surface: 'terminal' })
+    expect(await pane.find({ text: /^This docket was saved by a newer trial-run\.$/ })).toBeDefined()
+    expect(await pane.find({ text: /^Update the mod; nothing was changed\.$/ })).toBeDefined()
+  })
+
+  test('a docket with no layout reads as before', async ($, on) => {
+    mock.clock(on)
+    const saved = memoryStore(on, {
+      cases: [{ number: 6, command: 'git push -f', charge: 'force push', verdict: 'guilty', at: 1 }],
+    })
+    seatCourt(on, verdictBench(GUILTY))
+
+    await $.tool.check(check('git push --force origin main'))
+
+    const pane = await $.ui.mount({ ...PANE_SITE, surface: 'terminal' })
+    expect(await pane.find({ text: /Case #0007/ })).toBeDefined()
+    expect(saved.get('layout')).toBe(1)
+    expect(saved.get('cases') as unknown[]).toHaveLength(2)
   })
 })
 
