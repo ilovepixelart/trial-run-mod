@@ -268,6 +268,59 @@ describe('risky', () => {
     }
   })
 
+  test('a wrapper, its options and the operands it takes before the command do not hide a charge', () => {
+    for (const command of [
+      'timeout 5 rm -rf src',
+      'timeout -s KILL 5 rm -rf src',
+      'timeout --kill-after 9 5 rm -rf src',
+      'stdbuf -o0 rm -rf src',
+      'stdbuf -o 0 rm -rf src',
+      'chroot / rm -rf src',
+      'chroot --userspec root / rm -rf src',
+      'doas rm -rf src',
+      'doas -u root rm -rf src',
+      'setsid -f rm -rf src',
+      'ionice -c3 rm -rf src',
+      'ionice -c 3 -n 7 rm -rf src',
+      'taskset 1 rm -rf src',
+      'taskset -c 0,1 rm -rf src',
+      'flock /tmp/lock rm -rf src',
+      'flock -w 5 /tmp/lock rm -rf src',
+      "flock /tmp/lock -c 'rm -rf src'",
+      'caffeinate -i rm -rf src',
+      'caffeinate -t 60 rm -rf src',
+      'watch rm -rf src',
+      'watch -n 1 rm -rf src',
+      "watch 'rm -rf src'",
+      'parallel rm -rf ::: src',
+      "parallel -j 4 'rm -rf {}' ::: a b",
+      'parallel rm ::: -rf',
+      'busybox rm -rf src',
+      '=rm -rf src',
+      'noglob rm -rf src',
+      'nocorrect rm -rf src',
+      'timeout 5 sudo -u root rm -rf src',
+    ]) {
+      expect(chargeOf(command)?.id, command).toBe('recursive-delete')
+    }
+  })
+
+  test('a wrapper running something harmless is not charged', () => {
+    for (const command of [
+      'timeout 5 ls',
+      'timeout 5 rm file.txt',
+      'stdbuf -o0 ls -R',
+      'taskset -p 1 1234',
+      'flock /tmp/lock ls',
+      'watch -n 1 git status',
+      'parallel echo ::: rm -rf',
+      'busybox ls -R',
+      'noglob ls',
+    ]) {
+      expect(chargeOf(command), command).toBeUndefined()
+    }
+  })
+
   test('a wrapper option value, attached or apart, short or long, is not read as the command', () => {
     for (const command of [
       'sudo -uroot rm -rf src',
@@ -384,6 +437,12 @@ describe('risky', () => {
       '/usr/bin/sudo rm -rf node_modules',
       '/usr/bin/env rm -rf node_modules',
       '/usr/bin/xargs rm -rf',
+      'timeout 5 rm -rf src',
+      'chroot / rm -rf src',
+      'busybox rm -rf src',
+      'noglob rm -rf src',
+      'watch rm -rf src',
+      '=rm -rf src',
       '/bin/bash -c rm',
       '"$RM" -rf src',
       '"${RM}" -rf src',

@@ -100,7 +100,14 @@ export const RULES: readonly Rule[] = [
   },
 ]
 
-const WRAPPERS = new Set(['sudo', 'env', 'nice', 'time', 'command', 'builtin', 'exec', 'nohup', 'xargs'])
+/**
+ * Programs that run the command in the words after their own options and
+ * operands; `watch` and `parallel` hand those words to a shell as a script.
+ */
+const WRAPPERS = new Set([
+  'sudo', 'env', 'nice', 'time', 'command', 'builtin', 'exec', 'nohup', 'xargs', 'timeout', 'stdbuf', 'chroot', 'doas',
+  'setsid', 'ionice', 'taskset', 'flock', 'caffeinate', 'watch', 'parallel', 'busybox', 'noglob', 'nocorrect',
+])
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'mksh', 'ash', 'fish'])
 
 /**
@@ -134,10 +141,31 @@ const WRAPPER_VALUES = new Map<string, readonly string[]>([
   ['nice', ['-n', '--adjustment']],
   ['time', ['-f', '-o', '--format', '--output']],
   ['exec', ['-a']],
+  ['timeout', ['-s', '-k', '--signal', '--kill-after']],
+  ['stdbuf', ['-i', '-o', '-e', '--input', '--output', '--error']],
+  ['chroot', ['--userspec', '--groups']],
+  ['doas', ['-u', '-C']],
+  ['ionice', ['-c', '-n', '-p', '-P', '-u', '--class', '--classdata', '--pid', '--pgid', '--uid']],
+  ['flock', ['-w', '-E', '--wait', '--timeout', '--conflict-exit-code']],
+  ['caffeinate', ['-w', '-t']],
+  ['watch', ['-n', '--interval']],
+  ['parallel', ['-j', '-S', '-n', '-N', '-L', '-I', '-d', '-a', '-E', '--jobs', '--sshlogin', '--arg-file', '--delimiter', '--max-args', '--colsep', '--joblog', '--results', '--env', '--tmpdir', '--timeout']],
   [
     'xargs',
     ['-I', '-n', '-L', '-P', '-s', '-d', '-E', '-a', '--arg-file', '--delimiter', '--max-args', '--max-lines', '--max-procs', '--max-chars'],
   ],
+])
+
+/**
+ * How many operands a wrapper takes before the command: the duration of
+ * `timeout 5 rm`, the root of `chroot / rm`, the mask of `taskset 1 rm` and
+ * the lock file of `flock /tmp/lock rm`.
+ */
+const WRAPPER_OPERANDS = new Map([
+  ['timeout', 1],
+  ['chroot', 1],
+  ['taskset', 1],
+  ['flock', 1],
 ])
 
 /**
@@ -349,10 +377,10 @@ const lexOf = (line: string): { words: Word[]; scripts: string[] } => {
 /**
  * The program a command word names, read case-blind as a case-blind file
  * system (the macOS default) runs it: a path read as its last part
- * (`/bin/rm`). Undefined when the shell only resolves it at run time.
+ * (`/bin/rm`), and zsh's `=rm` as `rm`. Undefined when the shell only resolves it at run time.
  */
 const programOf = (word: Word): string | undefined =>
-  word.exact ? word.text.slice(word.text.lastIndexOf('/') + 1).toLowerCase() : undefined
+  word.exact ? word.text.slice(word.text.lastIndexOf('/') + 1).replace(/^=(?=.)/, '').toLowerCase() : undefined
 
 /**
  * The name a command word runs, however it is spelled: quotes, escapes and
@@ -440,16 +468,35 @@ const splitStringOf = (words: readonly Word[], at: number): string | undefined =
 }
 
 /**
+ * The script a wrapper runs from the words at `at`: what `env -S` splits,
+ * the value of `flock -c`, or every word left for `watch` and `parallel`
+ * (its `:::` arguments included: each is added to the command).
+ */
+const wrapperScriptOf = (wrapper: string, words: readonly Word[], at: number): string | undefined => {
+  const texts = words.map(word => word.text)
+  if (wrapper === 'env') {
+    return splitStringOf(words, at)
+  }
+  if (wrapper === 'flock') {
+    return commandOptionOf(texts, at)
+  }
+  const isScript = (wrapper === 'watch' || wrapper === 'parallel') && !(texts[at] ?? '').startsWith('-')
+  return isScript ? texts.slice(at).join(' ') : undefined
+}
+
+/**
  * Where the command starts past leading env assignments, keywords and
- * wrappers with their options, or the script an `env -S` runs instead.
+ * wrappers with their options and operands, or the script a wrapper runs
+ * instead.
  */
 const commandStartOf = (words: readonly Word[]): { at: number; script?: string } => {
   let at = 0
   let wrapper: string | undefined
+  let operands = 0
   while (at < words.length) {
     const word = words[at] ?? { text: '', exact: true }
     const program = programOf(word)
-    const script = wrapper === 'env' ? splitStringOf(words, at) : undefined
+    const script = wrapper === undefined ? undefined : wrapperScriptOf(wrapper, words, at)
     if (script !== undefined) {
       return { at, script }
     }
@@ -457,9 +504,13 @@ const commandStartOf = (words: readonly Word[]): { at: number; script?: string }
       at += 1
     } else if (program !== undefined && WRAPPERS.has(program)) {
       wrapper = program
+      operands = WRAPPER_OPERANDS.get(program) ?? 0
       at += 1
     } else if (wrapper !== undefined && word.text.startsWith('-')) {
       at += WRAPPER_VALUES.get(wrapper)?.includes(word.text) ? 2 : 1
+    } else if (operands > 0) {
+      operands -= 1
+      at += 1
     } else {
       break
     }
