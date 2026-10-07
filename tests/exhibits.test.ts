@@ -13,14 +13,17 @@ const ran = (exitCode: number, stdout = '') => ({ exitCode, stdout, stderr: '', 
 const subcommandOf = (query: ExhibitQuery) => query.argv.slice(1 + GIT_HARDENING.length)
 
 const ALLOWED = [
-  ['rev-parse', '--is-inside-work-tree'],
+  ['rev-parse', '--is-inside-work-tree', '--show-toplevel', '--show-prefix', '--abbrev-ref', 'HEAD'],
   ['rev-list', '--count', '@{upstream}..HEAD'],
 ]
 
 /**
  * A range between two plain ref names, as a named push reads it.
  */
-const RANGE = /^[A-Za-z0-9._\/-]+\.\.[A-Za-z0-9._\/-]+$/
+const RANGE = /^refs\/heads\/[A-Za-z0-9._\/-]+\.\.refs\/remotes\/[A-Za-z0-9._\/-]+$/
+
+const isPushConfigQuery = (args: readonly string[]) =>
+  args.length === 3 && args[0] === 'config' && args[1] === '--get-regexp' && /^\^remote\\\.[A-Za-z0-9_\\./-]+\\\.\(push\|mirror\)\$$/.test(args[2] ?? '')
 
 const isRangeQuery = (args: readonly string[]) =>
   ((args.length === 4 && args[0] === 'rev-list' && args[1] === '--count') ||
@@ -31,6 +34,7 @@ const isRangeQuery = (args: readonly string[]) =>
 const isAllowed = (args: readonly string[]) =>
   ALLOWED.some(allowed => allowed.length === args.length && allowed.every((word, i) => word === args[i])) ||
   isRangeQuery(args) ||
+  isPushConfigQuery(args) ||
   (args[0] === 'ls-files' && args.at(-2) === '--' &&
     [['--error-unmatch'], ['--others', '--exclude-standard'], ['--others', '--ignored', '--exclude-standard']].some(
       flags => flags.length === args.length - 3 && flags.every((flag, i) => flag === args[i + 1]),
@@ -66,7 +70,7 @@ describe('exhibits', () => {
         seen.add(subcommandOf(query)[0] ?? '')
       }
     }
-    expect([...seen].toSorted()).toEqual(['log', 'ls-files', 'rev-list', 'rev-parse'])
+    expect([...seen].toSorted()).toEqual(['config', 'log', 'ls-files', 'rev-list', 'rev-parse'])
   })
 
   test('the hardening turns off fsmonitor, hooks, the untracked cache, signatures and the pager, and the env drops system and global config and every askpass program', () => {
@@ -106,7 +110,7 @@ describe('exhibits', () => {
 
   test('each charge gathers the facts that bear on it', () => {
     const kinds = (command: string) => planOf(command).map(query => query.kind)
-    expect(kinds('git push --force origin main')).toEqual(['inside', 'behind', 'authors'])
+    expect(kinds('git push --force origin main')).toEqual(['inside', 'behind', 'authors', 'pushconfig'])
     expect(kinds('git reset --hard HEAD~3')).toEqual(['inside', 'ahead'])
     expect(kinds('rm -rf src')).toEqual(['inside', 'tracked', 'untracked'])
     // more targets than the court reads: none are read, never a partial picture
@@ -120,7 +124,7 @@ describe('exhibits', () => {
 
   test('results become facts: counts, tracked state, distinct authors, and nothing from a failed or missing result', () => {
     const plan = planOf('git push --force origin main')
-    const facts = factsOf(plan, [ran(0, 'true\n'), ran(0, '3\n'), ran(0, 'a@x\nb@y\na@x\n')])
+    const facts = factsOf(plan, [ran(0, 'true\n'), ran(0, '3\n'), ran(0, 'a@x\nb@y\na@x\n'), ran(1)])
     expect(facts).toEqual({ isRepo: true, behind: 3, upstreamAuthors: 2 })
 
     const deleted = planOf('rm -rf src')
@@ -178,13 +182,16 @@ describe('exhibits', () => {
 
   test('material facts exist only when every one the plan asks for was read', () => {
     const push = planOf('git push --force origin main')
-    expect(materialOf(push, { isRepo: true, behind: 0, upstreamAuthors: 1 })).toEqual({ behind: 0 })
-    expect(materialOf(push, { isRepo: true, upstreamAuthors: 1 })).toBeUndefined()
+    const here = { top: '/work/app', prefix: '', branch: 'main' }
+    expect(materialOf(push, { isRepo: true, ...here, behind: 0, upstreamAuthors: 1 })).toEqual({ ...here, behind: 0 })
+    expect(materialOf(push, { isRepo: true, behind: 0 })).toBeUndefined()
+    expect(materialOf(push, { isRepo: true, top: '/work/app', prefix: '', behind: 0 })).toBeUndefined()
+    expect(materialOf(push, { isRepo: true, ...here, upstreamAuthors: 1 })).toBeUndefined()
     expect(materialOf(push, { isRepo: false })).toBeUndefined()
     expect(materialOf(push, { behind: 0 })).toBeUndefined()
     const rm = planOf('rm -rf a b')
-    expect(materialOf(rm, { isRepo: true, tracked: { a: false, b: true } })).toEqual({ tracked: { a: false, b: true } })
-    expect(materialOf(rm, { isRepo: true, tracked: { a: false } })).toBeUndefined()
+    expect(materialOf(rm, { isRepo: true, ...here, tracked: { a: false, b: true } })).toEqual({ ...here, tracked: { a: false, b: true } })
+    expect(materialOf(rm, { isRepo: true, ...here, tracked: { a: false } })).toBeUndefined()
     expect(materialOf(planOf('git clean -fd'), { isRepo: true, untracked: { '.': 0 } })).toBeUndefined()
     expect(materialOf(planOf('git reset --hard HEAD~1'), { isRepo: true, ahead: 0 })).toBeUndefined()
     expect(materialOf(planOf('terraform destroy'), {})).toBeUndefined()
@@ -194,24 +201,42 @@ describe('exhibits', () => {
   test('unknown never equals unknown: facts match only when something was known and is the same', () => {
     expect(isSameMaterial({}, {})).toBe(false)
     expect(isSameMaterial({ tracked: {} }, { tracked: {} })).toBe(false)
-    expect(isSameMaterial({ behind: 0 }, { behind: 0 })).toBe(true)
-    expect(isSameMaterial({ tracked: { a: false } }, { tracked: { a: false } })).toBe(true)
+    // without where git ran, a fact names no place: unknown on both sides never matches
+    expect(isSameMaterial({ behind: 0 }, { behind: 0 })).toBe(false)
+    expect(isSameMaterial({ tracked: { a: false } }, { tracked: { a: false } })).toBe(false)
+    const here = { top: '/work/app', prefix: 'sub/', branch: 'main', tracked: { a: false } }
+    expect(isSameMaterial({ ...here, top: undefined }, { ...here, top: undefined })).toBe(false)
+    expect(isSameMaterial({ ...here, prefix: undefined }, { ...here, prefix: undefined })).toBe(false)
+    expect(isSameMaterial({ ...here, branch: undefined }, { ...here, branch: undefined })).toBe(false)
+    expect(isSameMaterial({ ...here, tracked: undefined }, { ...here, tracked: undefined })).toBe(false)
+    expect(isSameMaterial({ ...here, tracked: undefined, behind: 0 }, { ...here, tracked: undefined, behind: 0 })).toBe(true)
+    expect(isSameMaterial(here, { ...here })).toBe(true)
+    expect(isSameMaterial(here, { ...here, top: '/work/other' })).toBe(false)
+    expect(isSameMaterial(here, { ...here, prefix: '' })).toBe(false)
+    expect(isSameMaterial(here, { ...here, branch: 'dev' })).toBe(false)
+    expect(isSameMaterial({ tracked: { a: false } }, here)).toBe(false)
     expect(isSameMaterial({}, { tracked: { a: false } })).toBe(false)
   })
 
   test('a push is read for the branch it names, by name, and only in the one form that names it exactly', () => {
     const argsOf = (command: string) => planOf(command).map(subcommandOf)
     expect(argsOf('git push --force origin main')).toEqual([
-      ['rev-parse', '--is-inside-work-tree'],
-      ['rev-list', '--count', '--end-of-options', 'main..origin/main'],
-      ['log', '-20', '--no-show-signature', '--format=%ae', '--end-of-options', 'main..origin/main'],
+      ['rev-parse', '--is-inside-work-tree', '--show-toplevel', '--show-prefix', '--abbrev-ref', 'HEAD'],
+      ['rev-list', '--count', '--end-of-options', 'refs/heads/main..refs/remotes/origin/main'],
+      ['log', '-20', '--no-show-signature', '--format=%ae', '--end-of-options', 'refs/heads/main..refs/remotes/origin/main'],
+      ['config', '--get-regexp', '^remote\\.origin\\.(push|mirror)$'],
     ])
-    expect(argsOf('git push -f origin release/1.2')[1]).toEqual(['rev-list', '--count', '--end-of-options', 'release/1.2..origin/release/1.2'])
+    expect(argsOf('git push -f up.stream release/1.2')[1]).toEqual([
+      'rev-list', '--count', '--end-of-options', 'refs/heads/release/1.2..refs/remotes/up.stream/release/1.2',
+    ])
+    expect(argsOf('git push -f up.stream release/1.2')[3]).toEqual(['config', '--get-regexp', '^remote\\.up\\.stream\\.(push|mirror)$'])
     for (const command of [
       'git push --force',
       'git push -f',
       'git push --force origin',
       'git push --force origin HEAD:main',
+      'git push --force origin HEAD',
+      'git push --force origin @{u}',
       'git push --force origin feature:main',
       'git push --force origin +main',
       'git push --force origin main dev',
@@ -257,6 +282,33 @@ describe('exhibits', () => {
       tracked: { a: true, b: false },
       untracked: { a: 0, b: 1 },
     })
+  })
+
+  test('the repository, the directory within it and the branch are read with the first query', () => {
+    const plan = planOf('rm -rf build')
+    expect(factsOf(plan, [ran(0, 'true\n/work/app\nsub/\nmain\n'), ran(1), ran(0, '')])).toEqual({
+      isRepo: true, top: '/work/app', prefix: 'sub/', branch: 'main', tracked: { build: false }, untracked: { build: 0 },
+    })
+    expect(factsOf(plan, [ran(0, 'true\n/work/app\n\nmain\n'), ran(1), ran(0, '')]).prefix).toBe('')
+    expect(factsOf(plan, [ran(0, 'true\n'), ran(1), ran(0, '')]).top).toBeUndefined()
+    expect(factsOf(plan, [ran(0, 'true\n\n\nmain\n'), ran(1), ran(0, '')]).top).toBeUndefined()
+  })
+
+  test('a remote whose config rewrites or mirrors pushes leaves the push unknown', () => {
+    const plan = planOf('git push --force origin main')
+    const inside = ran(0, 'true\n/work/app\n\nmain\n')
+    expect(factsOf(plan, [inside, ran(0, '0\n'), ran(0, ''), ran(1)]).behind).toBe(0)
+    expect(factsOf(plan, [inside, ran(0, '0\n'), ran(0, ''), ran(0, 'remote.origin.push refs/heads/*:refs/heads/x/*\n')]).behind).toBeUndefined()
+    expect(factsOf(plan, [inside, ran(0, '0\n'), ran(0, 'a@x\n'), ran(128)]).behind).toBeUndefined()
+    expect(factsOf(plan, [inside, ran(0, '0\n'), ran(0, 'a@x\n'), undefined]).upstreamAuthors).toBeUndefined()
+  })
+
+  test('a detached HEAD names no branch, so the place is unknown', () => {
+    const plan = planOf('rm -rf build')
+    const facts = factsOf(plan, [ran(0, 'true\n/work/app\n\nHEAD\n'), ran(1), ran(0, '')])
+    expect(facts.branch).toBeUndefined()
+    expect(facts.top).toBeUndefined()
+    expect(materialOf(plan, facts)).toBeUndefined()
   })
 })
 

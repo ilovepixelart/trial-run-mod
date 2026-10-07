@@ -9,15 +9,22 @@ const GUILTY = 'VERDICT: GUILTY\nREASON: it erases the whole home folder'
 const ACQUITTED = 'VERDICT: NOT GUILTY\nREASON: build output is disposable'
 const check = (command: string) => ({ tool: 'Bash', input: { command } })
 
+/**
+ * What the first query prints in /work/app on main: inside, the top level,
+ * the directory within it (none) and the branch.
+ */
+const HERE = 'true\n/work/app\n\nmain\n'
+
 describe('precedent fails closed', () => {
   type Git = (argv: readonly string[]) => ReturnType<typeof gitSaid> | Promise<ReturnType<typeof gitSaid>>
-  const healthyRm: Git = argv => (argv.includes('rev-parse') ? gitSaid('true\n') : argv.includes('--error-unmatch') ? gitSaid('', 1) : gitSaid(''))
-  const healthyPush: Git = argv => (argv.includes('rev-parse') ? gitSaid('true\n') : argv.includes('rev-list') ? gitSaid('0\n') : gitSaid(''))
+  const healthyRm: Git = argv => (argv.includes('rev-parse') ? gitSaid(HERE) : argv.includes('--error-unmatch') ? gitSaid('', 1) : gitSaid(''))
+  const healthyPush: Git = argv =>
+    argv.includes('rev-parse') ? gitSaid(HERE) : argv.includes('rev-list') ? gitSaid('0\n') : argv.includes('config') ? gitSaid('', 1) : gitSaid('')
   const missing: Git = () => Promise.reject(new Error('spawn git ENOENT'))
   const notRepo: Git = () => gitSaid('', 128)
-  const noUpstream: Git = argv => (argv.includes('rev-parse') ? gitSaid('true\n') : gitSaid('', 128))
-  const garbage: Git = argv => (argv.includes('rev-parse') ? gitSaid('true\n') : gitSaid('three\n'))
-  const failingLsFiles: Git = argv => (argv.includes('rev-parse') ? gitSaid('true\n') : gitSaid('', 128))
+  const noUpstream: Git = argv => (argv.includes('rev-parse') ? gitSaid(HERE) : gitSaid('', 128))
+  const garbage: Git = argv => (argv.includes('rev-parse') ? gitSaid(HERE) : gitSaid('three\n'))
+  const failingLsFiles: Git = argv => (argv.includes('rev-parse') ? gitSaid(HERE) : gitSaid('', 128))
 
   const cases: [string, string, Git, Git][] = [
     ['git missing now', 'rm -rf build', healthyRm, missing],
@@ -122,7 +129,15 @@ describe('precedent fails closed', () => {
 describe('targets the shell reads differently', () => {
   // git that calls every path tracked: the reassuring answer, were it asked
   const reassuring = (argv: readonly string[]) =>
-    argv.includes('rev-parse') ? gitSaid('true\n') : argv.includes('rev-list') ? gitSaid('0\n') : argv.includes('--error-unmatch') ? gitSaid('x\n') : gitSaid('')
+    argv.includes('rev-parse')
+      ? gitSaid(HERE)
+      : argv.includes('rev-list')
+        ? gitSaid('0\n')
+        : argv.includes('--error-unmatch')
+          ? gitSaid('x\n')
+          : argv.includes('config')
+            ? gitSaid('', 1)
+            : gitSaid('')
 
   for (const command of [
     'rm -rf "build" src',
@@ -165,6 +180,88 @@ describe('targets the shell reads differently', () => {
     expect(seen.prompts.judge).toContain('<exhibit>Exhibit A: -x is tracked by git, so history keeps it.</exhibit>')
     await $.tool.check(check('git push --force origin main'))
     expect(seen.prompts.judge).toContain('<exhibit>Exhibit A: the upstream branch has no commits this branch lacks.</exhibit>')
+  })
+})
+
+describe('the world changes between two identical commands', () => {
+  type World = { top: string; prefix: string; branch: string; isTracked: boolean; behind: number }
+  const start: World = { top: '/work/app', prefix: '', branch: 'main', isTracked: false, behind: 0 }
+  const gitIn = (world: () => World) => (argv: readonly string[]) => {
+    const now = world()
+    if (argv.includes('rev-parse')) {
+      return gitSaid(`true\n${now.top}\n${now.prefix}\n${now.branch}\n`)
+    }
+    if (argv.includes('--error-unmatch')) {
+      return now.isTracked ? gitSaid('build/out.txt\n') : gitSaid('', 1)
+    }
+    if (argv.includes('rev-list')) {
+      return gitSaid(`${now.behind}\n`)
+    }
+    return argv.includes('config') ? gitSaid('', 1) : gitSaid('')
+  }
+
+  const changes: [string, string, Partial<World>][] = [
+    ['the file becomes tracked', 'rm -rf build', { isTracked: true }],
+    ['the shell is in another repository', 'rm -rf build', { top: '/work/other' }],
+    ['the shell is in a subdirectory of the same repository', 'rm -rf build', { prefix: 'packages/web/' }],
+    ['the branch switches', 'rm -rf build', { branch: 'release' }],
+    ['the upstream gains a commit', 'git push --force origin main', { behind: 1 }],
+    ['the branch switches before a push', 'git push --force origin main', { branch: 'release' }],
+  ]
+  for (const [name, command, change] of changes) {
+    test(`${name}: the second ${command} goes to trial`, async ($, on) => {
+      mock.clock(on)
+      const saved = memoryStore(on)
+      let world = start
+      const seen = seatCourt(on, { ...verdictBench(ACQUITTED), git: gitIn(() => world), root: () => '/work/app' })
+
+      await $.tool.check(check(command))
+      world = { ...start, ...change }
+      await $.tool.check(check(command))
+
+      expect(seen.calls).toHaveLength(6)
+      expect((saved.get('cases') as { precedent?: number }[]).map(one => one.precedent)).toEqual([undefined, undefined])
+    })
+  }
+
+  for (const command of ['rm -rf build', 'git push --force origin main']) {
+    test(`nothing changed: the second ${command} follows precedent`, async ($, on) => {
+      mock.clock(on)
+      memoryStore(on)
+      const seen = seatCourt(on, { ...verdictBench(ACQUITTED), git: gitIn(() => start), root: () => '/work/app' })
+
+      await $.tool.check(check(command))
+      await $.tool.check(check(command))
+
+      expect(seen.calls).toHaveLength(3)
+    })
+  }
+
+  test('a detached HEAD never follows precedent', async ($, on) => {
+    mock.clock(on)
+    memoryStore(on)
+    const seen = seatCourt(on, { ...verdictBench(ACQUITTED), git: gitIn(() => ({ ...start, branch: 'HEAD' })), root: () => '/work/app' })
+
+    await $.tool.check(check('rm -rf build'))
+    await $.tool.check(check('rm -rf build'))
+
+    expect(seen.calls).toHaveLength(6)
+  })
+
+  test('a stored case without its place binds nothing, even where the place is unread now too', async ($, on) => {
+    mock.clock(on)
+    memoryStore(on, {
+      layout: 2,
+      cases: [
+        { number: 1, command: 'rm -rf build', charge: 'recursive delete', verdict: 'acquitted', at: 1, root: '/work/app', facts: { tracked: { build: false } } },
+      ],
+    })
+    const unplaced = (argv: readonly string[]) => (argv.includes('rev-parse') ? gitSaid('true\n') : gitIn(() => start)(argv))
+    const seen = seatCourt(on, { ...verdictBench(ACQUITTED), git: unplaced, root: () => '/work/app' })
+
+    await $.tool.check(check('rm -rf build'))
+
+    expect(seen.calls).toHaveLength(3)
   })
 })
 

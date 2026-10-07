@@ -134,13 +134,15 @@ describe('docket', () => {
   })
 
   describe('precedent', () => {
+    // where git ran: precedent compares it too
+    const PLACE = { top: '/work/app', prefix: '', branch: 'main' }
     const heard = (number: number, verdict: CaseRecord['verdict'], over: Partial<CaseRecord> = {}): CaseRecord => ({
       ...record(number, 'recursive delete', verdict, 'rm -rf dist'),
       root: '/work/app',
-      facts: { tracked: { dist: false } },
+      facts: { ...PLACE, tracked: { dist: false } },
       ...over,
     })
-    const sought = { command: 'rm -rf dist', root: '/work/app', facts: { tracked: { dist: false } } }
+    const sought = { command: 'rm -rf dist', root: '/work/app', facts: { ...PLACE, tracked: { dist: false } } }
 
     test('an acquittal in the same project root on the same command line is precedent', () => {
       expect(precedentOf([heard(1, 'acquitted')], sought)?.number).toBe(1)
@@ -172,15 +174,15 @@ describe('docket', () => {
     })
 
     test('changed facts reopen the case: tracked state, or an upstream branch ahead', () => {
-      expect(precedentOf([heard(1, 'acquitted')], { ...sought, facts: { tracked: { dist: true } } })).toBeUndefined()
+      expect(precedentOf([heard(1, 'acquitted')], { ...sought, facts: { ...PLACE, tracked: { dist: true } } })).toBeUndefined()
       expect(precedentOf([heard(1, 'acquitted')], { ...sought, facts: {} })).toBeUndefined()
       const push = { command: 'git push --force origin main', root: '/work/app' }
       const pushed = (behind: number | undefined) =>
-        heard(1, 'acquitted', { command: push.command, facts: behind === undefined ? {} : { behind } })
-      expect(precedentOf([pushed(0)], { ...push, facts: { behind: 0 } })?.number).toBe(1)
-      expect(precedentOf([pushed(2)], { ...push, facts: { behind: 2 } })).toBeUndefined()
-      expect(precedentOf([pushed(0)], { ...push, facts: { behind: 1 } })).toBeUndefined()
-      expect(precedentOf([pushed(0)], { ...push, facts: {} })).toBeUndefined()
+        heard(1, 'acquitted', { command: push.command, facts: behind === undefined ? PLACE : { ...PLACE, behind } })
+      expect(precedentOf([pushed(0)], { ...push, facts: { ...PLACE, behind: 0 } })?.number).toBe(1)
+      expect(precedentOf([pushed(2)], { ...push, facts: { ...PLACE, behind: 2 } })).toBeUndefined()
+      expect(precedentOf([pushed(0)], { ...push, facts: { ...PLACE, behind: 1 } })).toBeUndefined()
+      expect(precedentOf([pushed(0)], { ...push, facts: PLACE })).toBeUndefined()
     })
 
     test('only a simple command line sets or follows precedent', () => {
@@ -203,7 +205,7 @@ describe('docket', () => {
       const [cut] = fileCase([], { command: long, charge: 'c', verdict: 'acquitted', at: 1, root: '/r', facts: {} })
       expect(cut?.command).toHaveLength(80)
       expect(precedentOf([cut!], { command: cut!.command, root: '/r', facts: {} })).toBeUndefined()
-      const known = { tracked: { x: false } }
+      const known = { ...PLACE, tracked: { x: false } }
       const [whole] = fileCase([], { command: 'rm -rf x', charge: 'c', verdict: 'acquitted', at: 1, root: '/r', facts: known })
       expect(precedentOf([whole!], { command: 'rm -rf x', root: '/r', facts: known })?.number).toBe(1)
     })

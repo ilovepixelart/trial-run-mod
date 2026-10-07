@@ -1017,6 +1017,9 @@ const behindRepo = (argv: readonly string[]) => {
   if (args[0] === 'rev-list') {
     return gitSaid('3\n')
   }
+  if (args[0] === 'config') {
+    return gitSaid('', 1)
+  }
   return gitSaid('ada@example.com\nlin@example.com\nada@example.com\n')
 }
 
@@ -1052,7 +1055,7 @@ describe('exhibits', () => {
 
     await $.tool.check(check('git push --force origin main'))
 
-    expect(seen.runs).toHaveLength(3)
+    expect(seen.runs).toHaveLength(4)
     for (const run of seen.runs) {
       expect(run.argv.slice(0, 1 + GIT_HARDENING.length)).toEqual(['git', ...GIT_HARDENING])
       expect(run.init).toEqual({ env: { ...GIT_ENV }, timeoutMs: 500 })
@@ -1122,7 +1125,7 @@ const ACQUITTED = 'VERDICT: NOT GUILTY\nREASON: node_modules is reinstalled by n
 const modulesRepo = (isTracked: () => boolean) => (argv: readonly string[]) => {
   const args = argv.slice(1 + GIT_HARDENING.length)
   if (args[0] === 'rev-parse') {
-    return gitSaid('true\n')
+    return gitSaid('true\n/work/app\n\nmain\n')
   }
   if (args.includes('--error-unmatch')) {
     return isTracked() ? gitSaid('node_modules/a\n') : gitSaid('', 1)
@@ -1209,7 +1212,7 @@ describe('precedent', () => {
       verdict: 'acquitted',
       at: expect.any(Number),
       root: '/work/app',
-      facts: { tracked: { node_modules: false } },
+      facts: { top: '/work/app', prefix: '', branch: 'main', tracked: { node_modules: false } },
     })
   })
 

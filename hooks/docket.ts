@@ -175,7 +175,11 @@ const factsRead = (stored: unknown): MaterialFacts | undefined => {
     return undefined
   }
   const { behind, tracked } = stored
+  const placed = (['top', 'prefix', 'branch'] as const).flatMap(key =>
+    typeof stored[key] === 'string' ? [[key, stored[key]] as const] : [],
+  )
   return {
+    ...Object.fromEntries(placed),
     ...(Number.isInteger(behind) && (behind as number) >= 0 ? { behind: behind as number } : {}),
     ...(isObject(tracked)
       ? { tracked: Object.fromEntries(Object.entries(tracked).filter(([, value]) => typeof value === 'boolean')) as Record<string, boolean> }

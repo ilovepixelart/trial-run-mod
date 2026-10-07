@@ -36,7 +36,7 @@ export const GIT_ENV = {
   LC_ALL: 'C',
 } as const
 
-export type ExhibitKind = 'inside' | 'behind' | 'ahead' | 'authors' | 'tracked' | 'untracked' | 'ignored'
+export type ExhibitKind = 'inside' | 'behind' | 'ahead' | 'authors' | 'pushconfig' | 'tracked' | 'untracked' | 'ignored'
 
 /**
  * One read-only git command the court runs for a fact, by argument vector.
@@ -54,6 +54,10 @@ export type ExhibitResult = { exitCode: number; stdout: string } | undefined
  */
 export type Facts = {
   isRepo?: boolean
+  /** Where git ran: the repository's top level, the directory within it, and the branch checked out. */
+  top?: string
+  prefix?: string
+  branch?: string
   /** Commits on the upstream branch this branch lacks. */
   behind?: number
   /** Local commits not on the upstream branch. */
@@ -69,10 +73,11 @@ export type Facts = {
 }
 
 /**
- * The facts precedent compares: whether the upstream branch moved, and
- * whether each target is still tracked.
+ * The facts precedent compares: where git ran (repository, directory,
+ * branch), whether the upstream branch moved, and whether each target is
+ * still tracked.
  */
-export type MaterialFacts = Pick<Facts, 'behind' | 'tracked'>
+export type MaterialFacts = Pick<Facts, 'top' | 'prefix' | 'branch' | 'behind' | 'tracked'>
 
 const MAX_TARGETS = 3
 const NAME_CELLS = 60
@@ -82,7 +87,7 @@ const git = (...args: string[]): readonly string[] => ['git', ...GIT_HARDENING, 
 const query = (kind: ExhibitKind, argv: readonly string[], target?: string): ExhibitQuery =>
   target === undefined ? { kind, argv } : { kind, argv, target }
 
-const INSIDE = query('inside', git('rev-parse', '--is-inside-work-tree'))
+const INSIDE = query('inside', git('rev-parse', '--is-inside-work-tree', '--show-toplevel', '--show-prefix', '--abbrev-ref', 'HEAD'))
 
 /**
  * The operands of an `rm`: its words after the command that are not flags,
@@ -117,7 +122,12 @@ const readableTargetsOf = (words: readonly string[]): string[] => {
 const PLAIN_REF = /^[A-Za-z0-9_][A-Za-z0-9._/-]*$/
 
 const isPlainRef = (name: string) =>
-  PLAIN_REF.test(name) && !name.includes('..') && !name.includes('//') && !name.endsWith('/') && !name.endsWith('.lock')
+  PLAIN_REF.test(name) &&
+  name !== 'HEAD' &&
+  !name.includes('..') &&
+  !name.includes('//') &&
+  !name.endsWith('/') &&
+  !name.endsWith('.lock')
 
 /**
  * The commands for a force push that names exactly one remote and one
@@ -134,11 +144,14 @@ const pushPlanOf = (words: readonly string[]): ExhibitQuery[] => {
   if (flags.some(flag => flag !== '--force' && flag !== '-f') || named.length !== 2 || !isPlainRef(remote) || !isPlainRef(branch)) {
     return []
   }
-  const range = `${branch}..${remote}/${branch}`
+  // full ref names: a tag or another ref of the same short name is never read
+  const range = `refs/heads/${branch}..refs/remotes/${remote}/${branch}`
   return [
     INSIDE,
     query('behind', git('rev-list', '--count', '--end-of-options', range)),
     query('authors', git('log', '-20', '--no-show-signature', '--format=%ae', '--end-of-options', range)),
+    // a remote's push or mirror config changes what `push origin main` sends
+    query('pushconfig', git('config', '--get-regexp', `^remote\\.${remote.replaceAll('.', '\\.')}\\.(push|mirror)$`)),
   ]
 }
 
@@ -202,6 +215,8 @@ const countOf = (stdout: string) => stdout.split('\n').filter(line => line.trim(
  */
 export const factsOf = (plan: readonly ExhibitQuery[], results: readonly ExhibitResult[]): Facts => {
   const facts: Facts = {}
+  // a push is read only once its remote is known to push plainly
+  let isPushPlain = !plan.some(one => one.kind === 'pushconfig')
   plan.forEach((one, at) => {
     const result = results[at]
     if (result === undefined) {
@@ -209,8 +224,17 @@ export const factsOf = (plan: readonly ExhibitQuery[], results: readonly Exhibit
     }
     const out = result.stdout.trim()
     switch (one.kind) {
-      case 'inside':
-        facts.isRepo = result.exitCode === 0 && out === 'true'
+      case 'inside': {
+        const [inside, top = '', prefix, branch = ''] = result.stdout.split('\n')
+        facts.isRepo = result.exitCode === 0 && inside === 'true'
+        // a detached HEAD prints HEAD for every commit: it names no branch
+        if (facts.isRepo && top !== '' && prefix !== undefined && branch !== '' && branch !== 'HEAD') {
+          Object.assign(facts, { top, prefix, branch })
+        }
+        break
+      }
+      case 'pushconfig':
+        isPushPlain = result.exitCode === 1
         break
       case 'behind':
       case 'ahead':
@@ -251,6 +275,10 @@ export const factsOf = (plan: readonly ExhibitQuery[], results: readonly Exhibit
   if (!isEveryTargetRead) {
     delete facts.tracked
     delete facts.untracked
+  }
+  if (!isPushPlain) {
+    delete facts.behind
+    delete facts.upstreamAuthors
   }
   return facts.isRepo === false ? { isRepo: false } : facts
 }
@@ -321,13 +349,17 @@ export const materialOf = (plan: readonly ExhibitQuery[], facts: Facts): Materia
   const asked = plan.filter(one => one.kind === 'behind' || one.kind === 'tracked')
   const isRead = (one: ExhibitQuery) =>
     one.kind === 'behind' ? facts.behind !== undefined : one.target !== undefined && facts.tracked?.[one.target] !== undefined
-  return asked.length > 0 && facts.isRepo === true && asked.every(isRead) ? materialFactsOf(facts) : undefined
+  const isPlaced = facts.top !== undefined && facts.prefix !== undefined && facts.branch !== undefined
+  return asked.length > 0 && facts.isRepo === true && isPlaced && asked.every(isRead) ? materialFactsOf(facts) : undefined
 }
 
 /**
  * The facts precedent compares.
  */
 export const materialFactsOf = (facts: Facts): MaterialFacts => ({
+  ...(facts.top === undefined ? {} : { top: facts.top }),
+  ...(facts.prefix === undefined ? {} : { prefix: facts.prefix }),
+  ...(facts.branch === undefined ? {} : { branch: facts.branch }),
   ...(facts.behind === undefined ? {} : { behind: facts.behind }),
   ...(facts.tracked === undefined ? {} : { tracked: facts.tracked }),
 })
@@ -337,13 +369,23 @@ const trackedOf = (facts: MaterialFacts) =>
 
 const isKnown = (facts: MaterialFacts) => facts.behind !== undefined || Object.keys(facts.tracked ?? {}).length > 0
 
+const isPlacedNow = (facts: MaterialFacts) =>
+  facts.top !== undefined && facts.prefix !== undefined && facts.branch !== undefined
+
 /**
- * Whether the facts that matter are the same then and now: something was
- * known (unknown never equals unknown), no upstream commits this branch
- * lacks in either, and every target tracked or not as before.
+ * Whether the facts that matter are the same then and now: where git ran
+ * was read now and is the same, a fact about the target was read
+ * (unknown never equals unknown), no upstream commits this branch lacks in
+ * either, and every target tracked or not as before. `now` comes from
+ * `materialOf`, so it holds every fact its charge asks for; equality
+ * makes `then` hold the same.
  */
 export const isSameMaterial = (then: MaterialFacts, now: MaterialFacts): boolean =>
+  isPlacedNow(now) &&
   isKnown(now) &&
+  then.top === now.top &&
+  then.prefix === now.prefix &&
+  then.branch === now.branch &&
   then.behind === now.behind &&
   (now.behind === undefined || now.behind === 0) &&
   trackedOf(then) === trackedOf(now)
