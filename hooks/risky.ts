@@ -184,11 +184,19 @@ const innerScriptOf = (words: readonly string[]): string | undefined => {
  *
  * @param command the Bash tool's `command`, as the model wrote it
  */
-export const chargeOf = (command: string): Charge | undefined => {
+export const chargeOf = (command: string): Charge | undefined => chargedOf(command)?.charge
+
+/**
+ * The charge a shell command is tried on, with the charged simple
+ * command's own words (wrappers and quotes set aside), or undefined.
+ *
+ * @param command the Bash tool's `command`, as the model wrote it
+ */
+export const chargedOf = (command: string): { charge: Charge; words: readonly string[] } | undefined => {
   for (const { words, text } of segmentsOf(command).flatMap(segment => commandsOf(segment))) {
     const rule = RULES.find(one => one.test(words))
     if (rule) {
-      return { id: rule.id, label: rule.label, command: text }
+      return { charge: { id: rule.id, label: rule.label, command: text }, words }
     }
   }
   return undefined
