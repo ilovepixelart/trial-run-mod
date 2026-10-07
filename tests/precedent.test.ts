@@ -420,3 +420,95 @@ describe('the world changes between two identical commands', () => {
   })
 })
 
+
+describe('a later conviction overturns an acquittal, whatever line it came from', () => {
+  const healthy = (argv: readonly string[]) =>
+    argv.includes('rev-parse') ? gitSaid(HERE) : argv.includes('--error-unmatch') ? gitSaid('', 1) : gitSaid('')
+  // a judge that rules each trial in turn, the last ruling standing after
+  const ruling = (rulings: string[]) => {
+    let heard = 0
+    return (role: 'prosecutor' | 'defense' | 'judge') => {
+      if (role !== 'judge') {
+        return said('Speech.')
+      }
+      heard += 1
+      return said(rulings[Math.min(heard, rulings.length) - 1] ?? GUILTY)
+    }
+  }
+  const court = (args: string) => ({
+    command: 'court',
+    args,
+    origin: { kind: 'composer' as const },
+    presentation: { isFullscreen: true, columns: 160 },
+  })
+
+  test('a compound conviction and its contempt send the acquitted command to trial after /clear', async ($, on) => {
+    mock.clock(on)
+    const saved = memoryStore(on)
+    on('classic.SessionStart', () => ({}))
+    const seen = seatCourt(on, { reply: ruling([ACQUITTED, GUILTY, ACQUITTED]), git: healthy, root: () => '/work/app' })
+
+    await $.tool.check(check('rm -rf src'))
+    await $.tool.check(check('true && rm -rf src'))
+    await $.tool.check(check('rm -rf src'))
+    await $.classic.SessionStart({ source: 'clear' })
+    await $.tool.check(check('rm -rf src'))
+
+    expect(seen.calls).toHaveLength(9)
+    const filed = saved.get('cases') as { verdict: string; precedent?: number }[]
+    expect(filed.map(one => [one.verdict, one.precedent])).toEqual([
+      ['acquitted', undefined],
+      ['guilty', undefined],
+      ['contempt', undefined],
+      ['acquitted', undefined],
+    ])
+  })
+
+  test('a conviction older than the acquittal does not stop it binding', async ($, on) => {
+    mock.clock(on)
+    const saved = memoryStore(on)
+    on('classic.SessionStart', () => ({}))
+    const seen = seatCourt(on, { reply: ruling([GUILTY, ACQUITTED]), git: healthy, root: () => '/work/app' })
+
+    await $.tool.check(check('true && rm -rf build'))
+    await $.classic.SessionStart({ source: 'clear' })
+    await $.tool.check(check('rm -rf build'))
+    await $.tool.check(check('rm -rf build'))
+
+    expect(seen.calls).toHaveLength(6)
+    const filed = saved.get('cases') as { verdict: string; precedent?: number }[]
+    expect(filed.at(-1)).toMatchObject({ verdict: 'acquitted', precedent: 2 })
+  })
+
+  test('a conviction filed without a root, as old dockets hold, blocks precedent in any root', async ($, on) => {
+    mock.clock(on)
+    const saved = memoryStore(on)
+    const seen = seatCourt(on, { ...verdictBench(ACQUITTED), git: healthy, root: () => '/work/app' })
+
+    await $.tool.check(check('rm -rf build'))
+    const [acquittal] = saved.get('cases') as unknown[]
+    saved.set('cases', [acquittal, { number: 2, command: 'rm -rf build', charge: 'recursive delete', verdict: 'guilty', at: 2 }])
+    await $.tool.check(check('rm -rf build'))
+
+    expect(seen.calls).toHaveLength(6)
+    const filed = saved.get('cases') as { precedent?: number }[]
+    expect(filed.at(-1)?.precedent).toBeUndefined()
+  })
+
+  test('a compound conviction, a contempt and an appeal are each filed with the session root', async ($, on) => {
+    mock.clock(on)
+    const saved = memoryStore(on)
+    seatCourt(on, { reply: ruling([GUILTY]), git: healthy, root: () => '/work/app' })
+
+    await $.tool.check(check('true && rm -rf src'))
+    await $.tool.check(check('rm -rf src'))
+    await $.command.run(court('appeal it is a scratch folder'))
+
+    const filed = saved.get('cases') as { verdict: string; appeal?: number; root?: string }[]
+    expect(filed.map(one => [one.verdict, one.appeal, one.root])).toEqual([
+      ['guilty', undefined, '/work/app'],
+      ['contempt', undefined, '/work/app'],
+      ['guilty', 1, '/work/app'],
+    ])
+  })
+})

@@ -1247,9 +1247,9 @@ describe('precedent', () => {
       await $.tool.check(check(payload))
       expect(seen.calls, payload).toHaveLength(3 * (at + 2))
     }
-    const filed = saved.get('cases') as { precedent?: number; root?: string }[]
+    const filed = saved.get('cases') as { precedent?: number; root?: string; facts?: unknown }[]
     expect(filed.map(one => one.precedent).filter(Boolean)).toEqual([])
-    expect(filed.slice(1).map(one => one.root)).toEqual(payloads.map(() => undefined))
+    expect(filed.slice(1).map(one => [one.root, one.facts])).toEqual(payloads.map(() => ['/work/app', undefined]))
   })
 
   test('an acquittal of a compound line sets no precedent for its charged part', async ($, on) => {

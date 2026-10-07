@@ -241,6 +241,7 @@ const appealWith = async ($: EngineInterface, memory: Memory, context: string): 
     charge: appealed.charge.label,
     verdict: ruling.kind,
     at: Date.now(),
+    root: await rootFrom($),
     appeal: appealed.number,
   })
   const key = contemptKeyOf(appealed.charge.command)
@@ -452,7 +453,7 @@ export const register: Register = on => {
         ),
       )
       quietly($.audio.play({ asset: GAVEL_SOUND }))
-      await fileOnDocket($, { command: charge.command, charge: charge.label, verdict: 'contempt', at: Date.now() })
+      await fileOnDocket($, { command: charge.command, charge: charge.label, verdict: 'contempt', at: Date.now(), root: await rootFrom($) })
       return contemptOf(convictedIn, charge.label)
     }
 
@@ -539,10 +540,10 @@ export const register: Register = on => {
     const heard = async (): Promise<Ruling> => {
       const [testimony, { exhibits, facts }, root] = await Promise.all([testimonyFrom($), exhibitsFrom(), rootFrom($)])
       // only a simple command line sets precedent: a compound line's
-      // acquittal says nothing about its charged part alone. Its root is
-      // kept even when the facts are unknown, so a conviction still
-      // overturns an earlier acquittal; unknown facts bind nothing
-      filed = isSimpleCommand(command) ? { root, ...(facts === undefined ? {} : { facts }) } : {}
+      // acquittal says nothing about its charged part alone, so it keeps
+      // no facts. Every case keeps its root, so a conviction, compound or
+      // with unknown facts, still overturns an earlier acquittal here
+      filed = { root, ...(isSimpleCommand(command) && facts !== undefined ? { facts } : {}) }
       const bound =
         root === undefined || facts === undefined ? undefined : precedentOf(history, { command, root, facts })
       if (bound !== undefined) {

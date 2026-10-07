@@ -16,9 +16,11 @@ export type CaseRecord = {
    */
   at: number
   /**
-   * Since layout 2, for a simple command line only: the project root the
-   * case was heard in and the facts that matter for precedent. A case
-   * without them sets no precedent.
+   * Since layout 2: the project root the case was heard in, when the
+   * session said; and, for a simple command line only, the facts that
+   * matter for precedent. An acquittal without both sets no precedent; a
+   * conviction without a root (filed before every case kept one) counts
+   * in every root.
    */
   root?: string
   facts?: MaterialFacts
@@ -107,10 +109,18 @@ const isConviction = (c: CaseRecord) => c.verdict === 'guilty' || c.verdict === 
 const isWholeSimple = (command: string) => command.length < COMMAND_CHARS && isSimpleCommand(command)
 
 /**
+ * Whether a case is a ruling that bears on precedent in a project root:
+ * an acquittal there, or a conviction there or of unknown root.
+ */
+const isRulingIn = (c: CaseRecord, root: string) =>
+  c.verdict === 'acquitted' ? c.root === root : isConviction(c) && (c.root === undefined || c.root === root)
+
+/**
  * The acquittal that binds a command line as precedent: the latest ruling
  * (guilty, acquitted or contempt) on the same simple command line in the
  * same project root, when it acquitted on the same facts that matter. A
- * line that is not one simple command never has precedent.
+ * conviction filed without a root counts as one in this root. A line that
+ * is not one simple command never has precedent.
  *
  * @param history the cases so far, oldest first
  * @param sought the whole command line, the project root and the facts now
@@ -125,8 +135,7 @@ export const precedentOf = (
   const key = contemptKeyOf(sought.command)
   const last = history.findLast(
     c =>
-      c.root === sought.root &&
-      (c.verdict === 'acquitted' || isConviction(c)) &&
+      isRulingIn(c, sought.root) &&
       isWholeSimple(c.command) &&
       contemptKeyOf(c.command) === key,
   )

@@ -175,6 +175,13 @@ describe('docket', () => {
       expect(precedentOf([heard(1, 'acquitted'), heard(2, 'hung'), heard(3, 'waived')], sought)?.number).toBe(1)
     })
 
+    test('a later conviction filed without a root overturns an acquittal in any root; one in another root does not', () => {
+      expect(precedentOf([heard(1, 'acquitted'), heard(2, 'guilty', { root: undefined })], sought)).toBeUndefined()
+      expect(precedentOf([heard(1, 'acquitted'), heard(2, 'contempt', { root: undefined, facts: undefined })], sought)).toBeUndefined()
+      expect(precedentOf([heard(1, 'guilty', { root: undefined }), heard(2, 'acquitted')], sought)?.number).toBe(2)
+      expect(precedentOf([heard(1, 'acquitted'), heard(2, 'guilty', { root: '/work/other' })], sought)?.number).toBe(1)
+    })
+
     test('changed facts reopen the case: tracked state, or an upstream branch ahead', () => {
       expect(precedentOf([heard(1, 'acquitted')], { ...sought, facts: { ...PLACE, tracked: { dist: true }, ...CLEAN('dist') } })).toBeUndefined()
       expect(precedentOf([heard(1, 'acquitted')], { ...sought, facts: {} })).toBeUndefined()
