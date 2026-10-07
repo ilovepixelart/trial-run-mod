@@ -342,6 +342,48 @@ export const factsOf = (plan: readonly ExhibitQuery[], results: readonly Exhibit
 }
 
 /**
+ * The delete targets a plan reads, each once, in order.
+ */
+export const targetsIn = (plan: readonly ExhibitQuery[]): string[] => [
+  ...new Set(plan.flatMap(one => (one.target === undefined ? [] : [one.target]))),
+]
+
+/**
+ * A path with `.` and `..` folded and repeated `/` dropped, by spelling.
+ */
+const foldedOf = (path: string) => {
+  const parts: string[] = []
+  for (const part of path.split('/')) {
+    if (part === '..') {
+      parts.pop()
+    } else if (part !== '' && part !== '.') {
+      parts.push(part)
+    }
+  }
+  return `/${parts.join('/')}`
+}
+
+/**
+ * Whether a target lands where its spelling says, from the real working
+ * directory: false when a symbolic link in any component sends it
+ * elsewhere, where git never looks, or when it does not resolve.
+ *
+ * @param here the working directory with every link followed
+ * @param target the path as the command names it
+ * @param real where it lands with every link followed, if anywhere
+ */
+export const isLexicalPath = (here: string, target: string, real: string | undefined): boolean =>
+  real !== undefined && real === foldedOf(target.startsWith('/') ? target : `${here}/${target}`)
+
+/**
+ * The facts with every fact about the delete targets removed.
+ */
+export const withoutTargets = (facts: Facts): Facts => {
+  const { tracked, untracked, ignoredIn, indexed, modifiedIn, ...rest } = facts
+  return rest
+}
+
+/**
  * The files to stat for the targets' changes: every index entry under
  * them, or none when there are more than the court reads, which leaves
  * every target's changes unknown.

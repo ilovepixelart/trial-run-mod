@@ -1,6 +1,6 @@
 import { describe, expect, mock, test, tier } from 'claude-code/testing'
 
-import { gitSaid, said, seatCourt, verdictBench } from './fixtures/court'
+import { gitSaid, plainStat, said, seatCourt, verdictBench } from './fixtures/court'
 import { memoryStore } from './fixtures/store'
 
 tier('user')
@@ -293,8 +293,8 @@ describe('the world changes between two identical commands', () => {
         mock.clock(on)
         memoryStore(on)
         let tree = clean
-        on('fs.stat', () => ({ value: { kind: 'file' as const, size: tree.size, mtimeMs: 100_250, isLink: false } }))
-        const seen = seatCourt(on, { ...verdictBench(ACQUITTED), git: treeGit(() => tree), root: () => '/work/app' })
+        const fs = (path: string, resolve: boolean) => plainStat(path, resolve, { kind: 'file', size: tree.size, mtimeMs: 100_250, isLink: false })
+        const seen = seatCourt(on, { ...verdictBench(ACQUITTED), git: treeGit(() => tree), root: () => '/work/app', fs })
 
         await $.tool.check(check('rm -rf src'))
         tree = { ...clean, ...change }
@@ -307,8 +307,8 @@ describe('the world changes between two identical commands', () => {
     test('a clean tracked target still follows precedent', async ($, on) => {
       mock.clock(on)
       memoryStore(on)
-      on('fs.stat', () => ({ value: { kind: 'file' as const, size: 5, mtimeMs: 100_250, isLink: false } }))
-      const seen = seatCourt(on, { ...verdictBench(ACQUITTED), git: treeGit(() => clean), root: () => '/work/app' })
+      const fs = (path: string, resolve: boolean) => plainStat(path, resolve, { kind: 'file', size: 5, mtimeMs: 100_250, isLink: false })
+      const seen = seatCourt(on, { ...verdictBench(ACQUITTED), git: treeGit(() => clean), root: () => '/work/app', fs })
 
       await $.tool.check(check('rm -rf src'))
       await $.tool.check(check('rm -rf src'))
@@ -319,13 +319,63 @@ describe('the world changes between two identical commands', () => {
     test('a file the court cannot stat leaves the target unknown', async ($, on) => {
       mock.clock(on)
       memoryStore(on)
-      on('fs.stat', () => ({ deny: 'no file system here' }))
-      const seen = seatCourt(on, { ...verdictBench(ACQUITTED), git: treeGit(() => clean), root: () => '/work/app' })
+      // the targets resolve, but no tracked file under them will stat
+      const fs = (path: string, resolve: boolean) => (resolve ? plainStat(path, resolve) : undefined)
+      const seen = seatCourt(on, { ...verdictBench(ACQUITTED), git: treeGit(() => clean), root: () => '/work/app', fs })
 
       await $.tool.check(check('rm -rf src'))
       await $.tool.check(check('rm -rf src'))
 
       expect(seen.calls).toHaveLength(6)
+    })
+  })
+
+  describe('a target behind a symbolic link', () => {
+    // cache is an untracked link: git reads nothing under it, wherever it points
+    const linkedGit = (argv: readonly string[]) =>
+      argv.includes('rev-parse') ? gitSaid(HERE) : argv.includes('--error-unmatch') ? gitSaid('', 1) : gitSaid('')
+    const linked = (pointsAt: () => string) => (path: string, resolve: boolean) =>
+      path.includes('/cache/') && resolve
+        ? { kind: 'dir' as const, size: 0, mtimeMs: 0, isLink: false, realPath: `${pointsAt()}/${path.slice(path.indexOf('/cache/') + 7)}` }
+        : plainStat(path, resolve)
+
+    test('a link retargeted between two identical deletes: tried both times, and no exhibit about the target', async ($, on) => {
+      mock.clock(on)
+      memoryStore(on)
+      let target = '/work/scratch'
+      const seen = seatCourt(on, { ...verdictBench(ACQUITTED), git: linkedGit, root: () => '/work/app', fs: linked(() => target) })
+
+      await $.tool.check(check('rm -rf cache/data'))
+      target = '/home/me/thesis'
+      await $.tool.check(check('rm -rf cache/data'))
+
+      expect(seen.calls).toHaveLength(6)
+      expect(seen.prompts.judge).not.toContain('<exhibit>')
+    })
+
+    test('a target the court cannot resolve is unknown: tried both times, and no exhibit about it', async ($, on) => {
+      mock.clock(on)
+      memoryStore(on)
+      const fs = (path: string, resolve: boolean) => (path.endsWith('/build') ? undefined : plainStat(path, resolve))
+      const seen = seatCourt(on, { ...verdictBench(ACQUITTED), git: linkedGit, root: () => '/work/app', fs })
+
+      await $.tool.check(check('rm -rf build'))
+      await $.tool.check(check('rm -rf build'))
+
+      expect(seen.calls).toHaveLength(6)
+      expect(seen.prompts.judge).not.toContain('<exhibit>')
+    })
+
+    test('a plain target beside a link keeps its exhibit and its precedent', async ($, on) => {
+      mock.clock(on)
+      memoryStore(on)
+      const seen = seatCourt(on, { ...verdictBench(ACQUITTED), git: linkedGit, root: () => '/work/app', fs: linked(() => '/work/scratch') })
+
+      await $.tool.check(check('rm -rf build'))
+      expect(seen.prompts.judge).toContain('<exhibit>Exhibit A: build is not tracked by git, so history does not keep it.</exhibit>')
+      await $.tool.check(check('rm -rf build'))
+
+      expect(seen.calls).toHaveLength(3)
     })
   })
 })

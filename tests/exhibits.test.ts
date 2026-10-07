@@ -1,6 +1,6 @@
 import { describe, expect, test, tier } from 'claude-code/testing'
 
-import { GIT_ENV, GIT_HARDENING, exhibitLinesOf, factsOf, isSameMaterial, materialFactsOf, materialOf, planOf, sanitizedOf, statPathsOf, withModified } from '../hooks/exhibits'
+import { GIT_ENV, GIT_HARDENING, exhibitLinesOf, factsOf, isSameMaterial, materialFactsOf, materialOf, planOf, sanitizedOf, isLexicalPath, statPathsOf, targetsIn, withModified, withoutTargets } from '../hooks/exhibits'
 import type { ExhibitQuery } from '../hooks/exhibits'
 
 tier('user')
@@ -389,6 +389,30 @@ describe('exhibits', () => {
         'Exhibit A: src is tracked by git, so history keeps it.',
         'Exhibit B: src holds 2 files changed since git last recorded them, which history does not keep.',
       ])
+    })
+  })
+
+  describe('a target behind a symbolic link', () => {
+    test('a target is plain only when it lands where its spelling says, from the real working directory', () => {
+      expect(isLexicalPath('/work/app', 'src', '/work/app/src')).toBe(true)
+      expect(isLexicalPath('/work/app', './src/../src', '/work/app/src')).toBe(true)
+      expect(isLexicalPath('/work/app', '/work/app/src', '/work/app/src')).toBe(true)
+      expect(isLexicalPath('/work/app', '-x', '/work/app/-x')).toBe(true)
+      expect(isLexicalPath('/work/app', '../lib', '/work/lib')).toBe(true)
+      expect(isLexicalPath('/work/app', 'cache/data', '/work/scratch/data')).toBe(false)
+      expect(isLexicalPath('/work/app', 'link', '/elsewhere')).toBe(false)
+      expect(isLexicalPath('/work/app', 'src', undefined)).toBe(false)
+    })
+
+    test('the targets a plan reads are the ones checked, and an unplain one removes every target fact', () => {
+      const plan = planOf('rm -rf src cache/data')
+      expect(targetsIn(plan)).toEqual(['src', 'cache/data'])
+      expect(targetsIn(planOf('git push --force origin main'))).toEqual([])
+      const facts = {
+        isRepo: true, top: '/work/app', prefix: '', branch: 'main',
+        tracked: { src: true }, untracked: { src: 0 }, ignoredIn: { src: 0 }, indexed: { src: [] }, modifiedIn: { src: 0 },
+      }
+      expect(withoutTargets(facts)).toEqual({ isRepo: true, top: '/work/app', prefix: '', branch: 'main' })
     })
   })
 })

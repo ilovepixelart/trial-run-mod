@@ -1,4 +1,4 @@
-import type { ModelCompleteResult, On, ProcessRunInit, ProcessRunResult, ResultOf, SessionMessage } from 'claude-code'
+import type { FsStat, ModelCompleteResult, On, ProcessRunInit, ProcessRunResult, ResultOf, SessionMessage } from 'claude-code'
 
 /**
  * Who speaks in a trial, as the plugin's system prompts name them.
@@ -30,7 +30,22 @@ export type Bench = {
    * The session's project root; `/project` when absent.
    */
   root?: () => string
+  /**
+   * How the file system answers a stat of an absolute path (the engine
+   * resolves a relative one against the working directory before any hook
+   * sees it); undefined refuses it. Absent, every path is a directory that
+   * lands where it is spelled.
+   */
+  fs?: (path: string, resolve: boolean) => FsStat | undefined
 }
+
+/**
+ * A stat of a path that lands where it is spelled.
+ */
+export const plainStat = (path: string, resolve: boolean, stat: Omit<FsStat, 'realPath'> = { kind: 'dir', size: 0, mtimeMs: 0, isLink: false }): FsStat => ({
+  ...stat,
+  ...(resolve ? { realPath: path } : {}),
+})
 
 /**
  * What the world beneath saw: each model call by role, and every pane opened.
@@ -106,6 +121,10 @@ export const seatCourt = (on: On, bench: Bench): Record => {
       return { value: await git(e.argv) }
     })
   }
+  on('fs.stat', ($, e) => {
+    const stat = bench.fs === undefined ? plainStat(e.path, e.resolve) : bench.fs(e.path, e.resolve)
+    return stat === undefined ? { deny: 'refused' } : { value: stat }
+  })
   on('audio.play', () => ({ value: undefined }))
   on('audio.speak', () => ({ value: { via: 'system' } }))
   return record

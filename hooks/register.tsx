@@ -4,7 +4,7 @@ import type { EngineInterface, Register, ResultOf } from 'claude-code'
 import type { CourtRole, CourtTrial, CourtVerdict } from '../types'
 import { contemptKeyOf } from './contempt'
 import { DOCKET_LAYOUT, casesOf, docketOf, fileCase, isReadableLayout, nextCaseNumber, precedentOf, priorsOf } from './docket'
-import { GIT_ENV, exhibitLinesOf, factsOf, materialOf, planOf, statPathsOf, withModified } from './exhibits'
+import { GIT_ENV, exhibitLinesOf, factsOf, isLexicalPath, materialOf, planOf, statPathsOf, targetsIn, withModified, withoutTargets } from './exhibits'
 import type { ExhibitResult, Facts } from './exhibits'
 import type { CaseRecord } from './docket'
 import { gaugeOf } from './gauge'
@@ -148,7 +148,18 @@ const factsFrom = async ($: EngineInterface, command: string): Promise<Facts> =>
       ]),
     ),
   )
-  const facts = factsOf(plan, results)
+  // a target behind a symbolic link is somewhere git never looks: unknown
+  const targets = targetsIn(plan)
+  const isPlaced =
+    targets.length === 0 ||
+    (await Promise.race([
+      Promise.all([$.fs.stat('.', { resolve: true }), ...targets.map(target => $.fs.stat(target, { resolve: true }))]).then(
+        ([here, ...there]) => targets.every((target, at) => isLexicalPath(here?.realPath ?? '', target, there[at]?.realPath)),
+        () => false,
+      ),
+      bound.then(() => false),
+    ]))
+  const facts = isPlaced ? factsOf(plan, results) : withoutTargets(factsOf(plan, results))
   // each indexed file against the index, within the same bound; a file
   // that will not stat, or a bound that runs out, leaves the change unknown
   const paths = statPathsOf(facts)
