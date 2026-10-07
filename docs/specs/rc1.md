@@ -1,0 +1,78 @@
+# trial-run 0.1.0: release candidate 1
+
+## Problem and outcome
+
+trial-run puts risky shell commands on trial. Live runs show three gaps: an agent can retry a convicted command and trigger a fresh trial each time, a conviction tells the agent what not to do but not what to do instead, and the court rules on words alone ("colleagues' work" for a solo repository). The release adds contempt, sentencing, exhibits gathered from the repository, precedent and appeals, and ships a clean, documented, versioned 0.1.0.
+
+## Acceptance clauses
+
+### Contempt of court
+
+- **CONTEMPT-001** A command identical to one convicted earlier in the same session is denied without a trial and without any model call. Check: `court.test.ts` "a retried conviction is contempt, decided with no model call".
+- **CONTEMPT-002** Identical means the same charged simple command after normalising whitespace and flag order of short flags (`rm -rf src` equals `rm -fr  src`). Check: `contempt.test.ts` normalisation table, both directions (different target paths are not contempt).
+- **CONTEMPT-003** The denial reason names contempt and the earlier case number, in character. Check: `verdict.test.ts` "contempt reason cites the case".
+- **CONTEMPT-004** The pane shows a CONTEMPT stamp in the guilty colour and files the case with verdict `contempt`; the docket counts it as a conviction. Check: `art.test.ts` widths for the contempt stamp; `docket.test.ts` "contempt counts as a conviction".
+- **CONTEMPT-005** Contempt memory is per session and cleared on `session.start`. Check: `court.test.ts` "a new session forgives contempt".
+
+### Sentencing
+
+- **SENTENCE-001** A guilty ruling carries a sentence: one safer alternative for the charged command, taken from a table per charge (force push to `--force-with-lease`, terraform destroy to `plan -destroy` first, recursive delete of a tracked path to `git rm -r`, hard reset to `git stash` first, git clean to `git clean -n`, kubectl delete to `--dry-run=client`, SQL drop to a backup first). Check: `sentence.test.ts` table, one row per charge.
+- **SENTENCE-002** The sentence is appended to the deny reason Claude receives, so the agent can take the safe path. Check: `verdict.test.ts` "guilty reason carries the sentence".
+- **SENTENCE-003** The pane shows "SENTENCE" under the court's ruling. Check: `court.test.ts` "the sentence is read out".
+- **SENTENCE-004** A charge without a table entry gets no sentence line rather than an invented one. Check: `sentence.test.ts` "unknown charge, no sentence".
+
+### Exhibits from the repository
+
+- **EXHIBIT-001** Before the speeches, the court gathers facts with read-only git commands only, from a fixed allowlist run through `$.process.run` with an argv array (never a shell string): `git rev-parse --is-inside-work-tree`, `git status --porcelain`, `git rev-list --count HEAD..@{upstream}`, `git log -5 --format=%ae @{upstream}`, `git ls-files --error-unmatch <path>` for delete targets. Check: `exhibits.test.ts` "only allowlisted argv run" over every charge.
+- **EXHIBIT-002** Each exhibit has a deadline (500 ms) and a total budget; a slow, failing or absent git yields "no exhibit", never a mistrial and never a delay past the trial deadline. Check: `exhibits.test.ts` timeout and failure cases with `mock.clock`.
+- **EXHIBIT-003** Exhibits reach all three roles as quoted evidence inside tags and are listed in the pane as "Exhibit A ...". Check: `court.test.ts` "exhibits are entered into evidence".
+- **EXHIBIT-004** Output passed to the models is truncated and stripped of control characters; author emails are reduced to a count of distinct authors. Check: `exhibits.test.ts` sanitising table.
+- **EXHIBIT-005** README access section lists the git commands and states they are read-only. Check: README review clause REL-004.
+
+### Precedent and appeals
+
+- **PRECEDENT-001** A command identical (CONTEMPT-002 rule) to one acquitted in this project before is acquitted by precedent without model calls, citing the case. Check: `court.test.ts` "precedent acquits with no model call".
+- **PRECEDENT-002** Precedent never overrides your rules: an acquittal by precedent still defers to the permission decision beneath, as any acquittal does. Check: `verdict.test.ts` "precedent is as weak as an acquittal".
+- **PRECEDENT-003** Precedent only binds within the same project root. Check: `docket.test.ts` "precedent is per project".
+- **PRECEDENT-004** Precedent does not expire, but it only applies when the current exhibits match the precedent case's exhibits on the facts that matter (upstream ahead count is zero in both, the target's tracked state is the same); otherwise the case goes to trial. The precedent case stores its exhibit summary. Check: `court.test.ts` "changed facts reopen the case".
+- **APPEAL-001** `/court appeal <context>` re-tries the most recent conviction with the added context as evidence and files the result as a new case marked appeal; a successful appeal clears contempt for that command. Check: `court.test.ts` appeal both outcomes.
+- **APPEAL-002** An appeal with no conviction to appeal says so and files nothing. Check: `court.test.ts` "nothing to appeal".
+
+### Release
+
+- **REL-001** Version lives in `plugin.json` only; `marketplace.json` matches it; a test asserts they agree. Check: `release.test.ts`.
+- **REL-002** CHANGELOG.md with 0.1.0, the public surface listed: commands (`/court`, `/court docket`, `/court appeal`), charges, store keys, required Claude Code version. Check: review.
+- **REL-003** Byte scan finds no em or en dashes; no secrets, no `.env`, no generated files tracked (`.claude-plugin/types/` ignored). Check: `scratchpad/dash_scan.py`, `git status --ignored` review.
+- **REL-004** README matches behaviour: every command, charge, access item and limitation in the code appears, and nothing absent from the code is claimed. Check: grep for each symbol, clause by clause.
+- **REL-005** Gates green as one chain: `claude plugin validate --strict .` && `claude plugin test .` && `npx -y -p typescript tsc -p .`; CI workflow green on GitHub on the pushed head SHA (after the owner approves the push).
+- **REL-006** Demo GIF recorded with no usage banner and no slash menu in any frame; every beat present. Check: frame sheet review.
+- **REL-007** Commits are small and logical, authored by the owner, no AI attribution; tag `trial-run--v0.1.0` via `claude plugin tag`. Check: `git log` review (only when the owner asks to commit).
+
+## Out of scope
+
+Desktop SVG rendering, sounds beyond the existing gavel, a public directory submission (after the owner reviews the release), light themes.
+
+## Risks
+
+- Exhibits widen access from none to read-only `git`; a malicious repository cannot inject through argv, but output reaches the model, hence EXHIBIT-004.
+- Contempt and precedent change cost and latency claims in the README and the article; REL-004 and the article sync cover it.
+- Precedent could acquit a command whose context changed (now on a shared branch). Mitigation: precedent requires the same project root and, when exhibits differ materially (upstream ahead now, not before), falls back to a trial. Open question below.
+
+## Decisions (owner, resolved)
+
+1. Exhibits: read-only git access is approved, allowlist only (EXHIBIT-001).
+2. Precedent: no expiry; changed exhibits reopen the case (PRECEDENT-004).
+3. Contempt: per session (CONTEMPT-005).
+
+## Micro-tasks, in order
+
+1. CONTEMPT-002 normaliser (pure) and tests.
+2. CONTEMPT-001, 003, 005 wiring in `tool.check`, reason text.
+3. CONTEMPT-004 stamp, docket verdict, art tests.
+4. SENTENCE-001, 004 table (pure).
+5. SENTENCE-002, 003 reason and pane.
+6. EXHIBIT-001, 002, 004 gatherer (pure argv plan plus a runner over `$.process.run`).
+7. EXHIBIT-003 evidence in prompts and pane; EXHIBIT-005 README.
+8. PRECEDENT-001 to 004.
+9. APPEAL-001, 002.
+10. REL-001 to 004, then live playground verification of every feature, then REL-006 recording after the usage banner clears, then REL-005 and REL-007 on the owner's go-ahead.
