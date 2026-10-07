@@ -25,12 +25,18 @@ The court is strict but not unreasonable: `rm -rf node_modules` for a clean rein
 Requires Claude Code 2.1.287 or later (mods). Developed and tested on 2.1.292. The court is designed for a dark Claude Code theme; on a light theme some text in the pane is hard to read.
 
 ```
-/plugin marketplace add <owner>/trial-run-mod
+/plugin marketplace add ilovepixelart/trial-run-mod
 /plugin install trial-run@trial-run-mod
 /reload-plugins
 ```
 
+To stay on one release, add the marketplace at its tag instead: `/plugin marketplace add ilovepixelart/trial-run-mod#trial-run--v<version>` (release tags are listed on the repository's Releases page). To take a newer release later, run `claude plugin update trial-run@trial-run-mod` in your shell.
+
 To try it from a clone without installing: `claude --plugin-dir /path/to/trial-run-mod`.
+
+### Versioning
+
+Versions follow [Semantic Versioning](https://semver.org); while trial-run is 0.y.z, any release may change behaviour. Each release is tagged `trial-run--v<version>` and described in [CHANGELOG.md](CHANGELOG.md). The saved docket carries a layout number, and a version that finds a newer layout leaves it untouched.
 
 ## What goes to trial
 
