@@ -83,7 +83,8 @@ export const RULES: readonly Rule[] = [
     label: 'dropped or truncated data',
     test: words =>
       SQL_CLIENTS.has(words[0] ?? '') &&
-      /\b(drop\s+(table|database|schema)|truncate)\b/i.test(words.join(' ')),
+      // a /* comment */ separates words as a space does
+      /\b(drop(\s|\/\*[\s\S]*?\*\/)+(table|database|schema)|truncate)\b/i.test(words.join(' ')),
   },
   {
     id: 'kubectl-delete',

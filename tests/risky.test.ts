@@ -46,6 +46,12 @@ describe('risky', () => {
     }
   })
 
+  test('a SQL comment between the words of a drop does not hide it', () => {
+    for (const command of ["psql -c 'DROP/**/TABLE x'", "psql -c 'DROP /* gone */ TABLE x'", "mysql -e 'drop/*\nx*/database prod'"]) {
+      expect(chargeOf(command)?.id, command).toBe('drop-table')
+    }
+  })
+
   test('global flags before the subcommand do not hide a teardown', () => {
     const cases: readonly (readonly [string, string])[] = [
       ['terraform -chdir=infra destroy -auto-approve', 'terraform-destroy'],
