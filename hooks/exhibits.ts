@@ -4,9 +4,11 @@ import { chargedOf } from './risky'
  * Flags every exhibit runs git with. A repository's own config can name
  * programs git runs on its behalf; these turn off the ones the allowlisted
  * commands could reach: the filesystem monitor (`ls-files` runs it), hooks,
- * the untracked cache, and signature verification in `log`. `status` and
- * `diff` are not on the allowlist at all: they run a repository's clean
- * filters and external diff, which no flag here turns off.
+ * the untracked cache, signature verification in `log`, and the pager.
+ * `status` and `diff` are not on the allowlist at all: they run a
+ * repository's clean filters and external diff, which no flag here turns
+ * off. `tests/hostile/git.hostile.mjs` runs every plan against such a
+ * repository.
  */
 export const GIT_HARDENING = [
   '-c', 'core.fsmonitor=false',
@@ -14,17 +16,23 @@ export const GIT_HARDENING = [
   '-c', 'core.untrackedCache=false',
   '-c', 'log.showSignature=false',
   '--no-optional-locks',
+  '--no-pager',
 ] as const
 
 /**
  * The environment every exhibit runs git in: no system or global config, no
- * prompts, no lock files, plain output.
+ * prompts, no lock files, no pager, plain output. An empty askpass is no
+ * program at all, where an unset one would fall back to `core.askPass`.
  */
 export const GIT_ENV = {
   GIT_CONFIG_NOSYSTEM: '1',
   GIT_CONFIG_GLOBAL: '/dev/null',
   GIT_TERMINAL_PROMPT: '0',
   GIT_OPTIONAL_LOCKS: '0',
+  GIT_PAGER: 'cat',
+  PAGER: 'cat',
+  GIT_ASKPASS: '',
+  SSH_ASKPASS: '',
   LC_ALL: 'C',
 } as const
 

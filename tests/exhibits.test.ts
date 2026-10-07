@@ -58,19 +58,24 @@ describe('exhibits', () => {
     expect([...seen].toSorted()).toEqual(['log', 'ls-files', 'rev-list', 'rev-parse'])
   })
 
-  test('the hardening turns off fsmonitor, hooks, the untracked cache and signatures, and the env drops system and global config', () => {
+  test('the hardening turns off fsmonitor, hooks, the untracked cache, signatures and the pager, and the env drops system and global config and every askpass program', () => {
     expect(GIT_HARDENING).toEqual([
       '-c', 'core.fsmonitor=false',
       '-c', 'core.hooksPath=/dev/null',
       '-c', 'core.untrackedCache=false',
       '-c', 'log.showSignature=false',
       '--no-optional-locks',
+      '--no-pager',
     ])
     expect(GIT_ENV).toEqual({
       GIT_CONFIG_NOSYSTEM: '1',
       GIT_CONFIG_GLOBAL: '/dev/null',
       GIT_TERMINAL_PROMPT: '0',
       GIT_OPTIONAL_LOCKS: '0',
+      GIT_PAGER: 'cat',
+      PAGER: 'cat',
+      GIT_ASKPASS: '',
+      SSH_ASKPASS: '',
       LC_ALL: 'C',
     })
   })

@@ -36,6 +36,9 @@ jobs:
       - name: Test
         run: claude plugin test .
 
+      - name: Hostile git repositories
+        run: node --test tests/hostile/git.hostile.mjs
+
       # The engine writes the type declarations into .claude-plugin/types/ when
       # it loads the plugin, which happens before the login check; with no
       # credentials the run then exits non-zero by design. The file check is the gate.

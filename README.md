@@ -55,7 +55,7 @@ Before counsel speaks, the court reads a few facts from git in the directory the
 | recursive delete with `rm` | for each of the first 3 paths: `git ls-files --error-unmatch -- <path>` (tracked or not) and `git ls-files --others --exclude-standard -- <path>` (how many untracked files under it) |
 | git clean | `git ls-files --others --exclude-standard`, plus `--ignored` when `-x` is given |
 
-A `find -delete` is only checked for being in a repository; the SQL, `kubectl` and `terraform` charges run no git at all. The commands are argument vectors from one table in [`hooks/exhibits.ts`](hooks/exhibits.ts), never a shell string, with every path after `--`. Each runs as `git -c core.fsmonitor=false -c core.hooksPath=/dev/null -c core.untrackedCache=false -c log.showSignature=false --no-optional-locks`, with system and global git config off. Nothing is fetched: the upstream branch is as of your last fetch. All of them run at once and get 500 ms; a git that is missing, fails or is slower is left out of evidence, never a mistrial. `git status` and `git diff` are never run: a repository's own config can make them run programs (a clean filter, an external diff) that these flags do not turn off.
+A `find -delete` is only checked for being in a repository; the SQL, `kubectl` and `terraform` charges run no git at all. The commands are argument vectors from one table in [`hooks/exhibits.ts`](hooks/exhibits.ts), never a shell string, with every path after `--`. Each runs as `git -c core.fsmonitor=false -c core.hooksPath=/dev/null -c core.untrackedCache=false -c log.showSignature=false --no-optional-locks --no-pager`, with system and global git config off, `GIT_PAGER` and `PAGER` set to `cat`, `GIT_ASKPASS` and `SSH_ASKPASS` empty and `GIT_TERMINAL_PROMPT=0`. Nothing is fetched: the upstream branch is as of your last fetch. All of them run at once and get 500 ms; a git that is missing, fails or is slower is left out of evidence, never a mistrial. `git status` and `git diff` are never run: a repository's own config can make them run programs (a clean filter, an external diff) that these flags do not turn off. [`tests/hostile/git.hostile.mjs`](tests/hostile/git.hostile.mjs) runs every planned command against real repositories whose config, `include.path` or `includeIf` names a program for the filesystem monitor, filters, diff drivers, pagers, hooks, askpass, ssh, credentials, gpg and aliases, and asserts none of them runs.
 
 ## How a verdict becomes a decision
 
@@ -133,10 +133,11 @@ No file system or network access, and no process but those git commands. [PRIVAC
 ```sh
 claude plugin validate --strict .
 claude plugin test .
+node --test tests/hostile/git.hostile.mjs
 npx -p typescript tsc -p .
 ```
 
-`tsc` needs the type declarations Claude Code writes into `.claude-plugin/types/` when it loads the plugin (any `claude --plugin-dir .` run does it). The gavel is synthesized: `python3 scripts/make_gavel.py sounds/gavel.wav` regenerates it. The demo is recorded with [vhs](https://github.com/charmbracelet/vhs) from a scratch repository.
+The hostile git test runs real git outside the plugin test kit, which runs no processes. `tsc` needs the type declarations Claude Code writes into `.claude-plugin/types/` when it loads the plugin (any `claude --plugin-dir .` run does it). The gavel is synthesized: `python3 scripts/make_gavel.py sounds/gavel.wav` regenerates it. The demo is recorded with [vhs](https://github.com/charmbracelet/vhs) from a scratch repository.
 
 ## License
 
