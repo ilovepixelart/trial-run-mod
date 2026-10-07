@@ -19,7 +19,7 @@ Claude's own words are among this evidence, so the defendant can try to sway the
 
 ## What it keeps
 
-In Claude Code's plugin store on this machine (`$.store`), one record per case: the case number, the charged command cut to 80 characters, the charge, the verdict and the time. For precedent, also the session's project root path, the repository's path, the directory within it and the branch git reported, whether each deleted path was tracked and how many untracked, ignored and changed files were under it, the case an acquittal by precedent cites, and the case an appeal retried. At most the newest 200 cases are kept, plus the docket's layout version.
+In Claude Code's plugin store on this machine (`$.store`), one record per case: the case number, the charged command cut to 80 characters, the charge, the verdict, the time and the session's project root path when Claude Code reports one. For precedent, also the repository's path, the directory within it and the branch git reported, whether each deleted path was tracked and how many untracked, ignored and changed files were under it, the case an acquittal by precedent cites, and the case an appeal retried. At most the newest 200 cases are kept, plus the docket's layout version.
 
 Nothing else is written. Sounds (the gavel and the spoken verdict) play locally.
 
