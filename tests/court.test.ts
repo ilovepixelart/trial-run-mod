@@ -1212,7 +1212,15 @@ describe('precedent', () => {
       verdict: 'acquitted',
       at: expect.any(Number),
       root: '/work/app',
-      facts: { top: '/work/app', prefix: '', branch: 'main', tracked: { node_modules: false } },
+      facts: {
+        top: '/work/app',
+        prefix: '',
+        branch: 'main',
+        tracked: { node_modules: false },
+        untracked: { node_modules: 0 },
+        ignoredIn: { node_modules: 0 },
+        modifiedIn: { node_modules: 0 },
+      },
     })
   })
 

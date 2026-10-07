@@ -1,6 +1,6 @@
 import { describe, expect, test, tier } from 'claude-code/testing'
 
-import { GIT_ENV, GIT_HARDENING, exhibitLinesOf, factsOf, isSameMaterial, materialFactsOf, materialOf, planOf, sanitizedOf } from '../hooks/exhibits'
+import { GIT_ENV, GIT_HARDENING, exhibitLinesOf, factsOf, isSameMaterial, materialFactsOf, materialOf, planOf, sanitizedOf, statPathsOf, withModified } from '../hooks/exhibits'
 import type { ExhibitQuery } from '../hooks/exhibits'
 
 tier('user')
@@ -36,7 +36,7 @@ const isAllowed = (args: readonly string[]) =>
   isRangeQuery(args) ||
   isPushConfigQuery(args) ||
   (args[0] === 'ls-files' && args.at(-2) === '--' &&
-    [['--error-unmatch'], ['--others', '--exclude-standard'], ['--others', '--ignored', '--exclude-standard']].some(
+    [['--error-unmatch'], ['--others', '--exclude-standard'], ['--others', '--ignored', '--exclude-standard'], ['--debug']].some(
       flags => flags.length === args.length - 3 && flags.every((flag, i) => flag === args[i + 1]),
     )) ||
   (args[0] === 'ls-files' &&
@@ -104,7 +104,7 @@ describe('exhibits', () => {
       }
     }
     expect(planOf('rm -rf -- -rf --output=/tmp/x').map(query => query.target).filter(Boolean)).toEqual([
-      '-rf', '-rf', '-rf', '--output=/tmp/x', '--output=/tmp/x', '--output=/tmp/x',
+      '-rf', '-rf', '-rf', '-rf', '--output=/tmp/x', '--output=/tmp/x', '--output=/tmp/x', '--output=/tmp/x',
     ])
   })
 
@@ -112,7 +112,7 @@ describe('exhibits', () => {
     const kinds = (command: string) => planOf(command).map(query => query.kind)
     expect(kinds('git push --force origin main')).toEqual(['inside', 'behind', 'authors', 'pushconfig'])
     expect(kinds('git reset --hard HEAD~3')).toEqual(['inside', 'ahead'])
-    expect(kinds('rm -rf src')).toEqual(['inside', 'tracked', 'untracked', 'ignored'])
+    expect(kinds('rm -rf src')).toEqual(['inside', 'tracked', 'untracked', 'ignored', 'indexed'])
     // more targets than the court reads: none are read, never a partial picture
     expect(kinds('rm -rf a b c d')).toEqual(['inside'])
     expect(kinds('git clean -fd')).toEqual(['inside', 'untracked'])
@@ -192,8 +192,11 @@ describe('exhibits', () => {
   })
 
   test('the facts that matter for precedent: upstream ahead and each target tracked or not', () => {
-    expect(materialFactsOf({ isRepo: true, behind: 0, upstreamAuthors: 4, untracked: { src: 3 } })).toEqual({ behind: 0 })
-    expect(materialFactsOf({ isRepo: true, tracked: { src: true }, untracked: { src: 1 } })).toEqual({ tracked: { src: true } })
+    expect(materialFactsOf({ isRepo: true, behind: 0, upstreamAuthors: 4 })).toEqual({ behind: 0 })
+    expect(materialFactsOf({ isRepo: true, tracked: { src: true }, untracked: { src: 3 }, ignoredIn: { src: 0 }, modifiedIn: { src: 1 } })).toEqual({
+      tracked: { src: true }, untracked: { src: 3 }, ignoredIn: { src: 0 }, modifiedIn: { src: 1 },
+    })
+    expect(materialFactsOf({ isRepo: true, tracked: { src: true }, untracked: { src: 1 } })).toEqual({ tracked: { src: true }, untracked: { src: 1 } })
     expect(materialFactsOf({})).toEqual({})
   })
 
@@ -207,8 +210,9 @@ describe('exhibits', () => {
     expect(materialOf(push, { isRepo: false })).toBeUndefined()
     expect(materialOf(push, { behind: 0 })).toBeUndefined()
     const rm = planOf('rm -rf a b')
-    expect(materialOf(rm, { isRepo: true, ...here, tracked: { a: false, b: true } })).toEqual({ ...here, tracked: { a: false, b: true } })
-    expect(materialOf(rm, { isRepo: true, ...here, tracked: { a: false } })).toBeUndefined()
+    const clean = { untracked: { a: 0, b: 0 }, ignoredIn: { a: 0, b: 0 }, modifiedIn: { a: 0, b: 0 } }
+    expect(materialOf(rm, { isRepo: true, ...here, tracked: { a: false, b: true }, ...clean })).toEqual({ ...here, tracked: { a: false, b: true }, ...clean })
+    expect(materialOf(rm, { isRepo: true, ...here, tracked: { a: false }, ...clean })).toBeUndefined()
     expect(materialOf(planOf('git clean -fd'), { isRepo: true, untracked: { '.': 0 } })).toBeUndefined()
     expect(materialOf(planOf('git reset --hard HEAD~1'), { isRepo: true, ahead: 0 })).toBeUndefined()
     expect(materialOf(planOf('terraform destroy'), {})).toBeUndefined()
@@ -221,7 +225,7 @@ describe('exhibits', () => {
     // without where git ran, a fact names no place: unknown on both sides never matches
     expect(isSameMaterial({ behind: 0 }, { behind: 0 })).toBe(false)
     expect(isSameMaterial({ tracked: { a: false } }, { tracked: { a: false } })).toBe(false)
-    const here = { top: '/work/app', prefix: 'sub/', branch: 'main', tracked: { a: false } }
+    const here = { top: '/work/app', prefix: 'sub/', branch: 'main', tracked: { a: false }, untracked: { a: 0 }, ignoredIn: { a: 0 }, modifiedIn: { a: 0 } }
     expect(isSameMaterial({ ...here, top: undefined }, { ...here, top: undefined })).toBe(false)
     expect(isSameMaterial({ ...here, prefix: undefined }, { ...here, prefix: undefined })).toBe(false)
     expect(isSameMaterial({ ...here, branch: undefined }, { ...here, branch: undefined })).toBe(false)
@@ -286,20 +290,23 @@ describe('exhibits', () => {
     }
     expect(planOf('rm -rf a b c d').map(query => query.kind)).toEqual(['inside'])
     expect(planOf('rm -rf build/').map(query => query.kind)).toEqual(['inside'])
-    expect(planOf('rm -rf -- -x').map(query => query.target)).toEqual([undefined, '-x', '-x', '-x'])
-    expect(planOf('rm -rf node_modules').map(query => query.kind)).toEqual(['inside', 'tracked', 'untracked', 'ignored'])
+    expect(planOf('rm -rf -- -x').map(query => query.target)).toEqual([undefined, '-x', '-x', '-x', '-x'])
+    expect(planOf('rm -rf node_modules').map(query => query.kind)).toEqual(['inside', 'tracked', 'untracked', 'ignored', 'indexed'])
   })
 
   test('one unread target removes every target fact', () => {
     const plan = planOf('rm -rf a b')
-    expect(factsOf(plan, [ran(0, 'true\n'), ran(0, 'a\n'), ran(0, ''), ran(0, ''), ran(128), ran(0, ''), ran(0, '')])).toEqual({ isRepo: true })
-    expect(factsOf(plan, [ran(0, 'true\n'), ran(0, 'a\n'), ran(0, ''), ran(0, ''), ran(1), undefined, ran(0, '')])).toEqual({ isRepo: true })
-    expect(factsOf(plan, [ran(0, 'true\n'), ran(0, 'a\n'), ran(0, ''), ran(0, ''), ran(1), ran(0, 'b/x\n'), undefined])).toEqual({ isRepo: true })
-    expect(factsOf(plan, [ran(0, 'true\n'), ran(0, 'a\n'), ran(0, ''), ran(0, ''), ran(1), ran(0, 'b/x\n'), ran(0, 'b/y.log\n')])).toEqual({
+    // per target: tracked, untracked, ignored, indexed
+    const a = [ran(0, 'a\n'), ran(0, ''), ran(0, ''), ran(0, '')]
+    expect(factsOf(plan, [ran(0, 'true\n'), ...a, ran(128), ran(0, ''), ran(0, ''), ran(0, '')])).toEqual({ isRepo: true })
+    expect(factsOf(plan, [ran(0, 'true\n'), ...a, ran(1), undefined, ran(0, ''), ran(0, '')])).toEqual({ isRepo: true })
+    expect(factsOf(plan, [ran(0, 'true\n'), ...a, ran(1), ran(0, 'b/x\n'), undefined, ran(0, '')])).toEqual({ isRepo: true })
+    expect(factsOf(plan, [ran(0, 'true\n'), ...a, ran(1), ran(0, 'b/x\n'), ran(0, 'b/y.log\n'), undefined])).toEqual({
       isRepo: true,
       tracked: { a: true, b: false },
       untracked: { a: 0, b: 1 },
       ignoredIn: { a: 0, b: 1 },
+      indexed: { a: [] },
     })
   })
 
@@ -328,6 +335,61 @@ describe('exhibits', () => {
     expect(facts.branch).toBeUndefined()
     expect(facts.top).toBeUndefined()
     expect(materialOf(plan, facts)).toBeUndefined()
+  })
+
+  describe('a clean target', () => {
+    const HERE = 'true\n/work/app\n\nmain\n'
+    const entry = (path: string, size: number) => `${path}\n  ctime: 100:0\n  mtime: 100:250000000\n  dev: 1\tino: 2\n  uid: 1\tgid: 1\n  size: ${size}\tflags: 0\n`
+    const plan = planOf('rm -rf src')
+    const read = (untracked = '', ignored = '', debug = entry('src/a.txt', 5)) =>
+      factsOf(plan, [ran(0, HERE), ran(0, 'src/a.txt\n'), ran(0, untracked), ran(0, ignored), ran(0, debug)])
+    const same = { kind: 'file' as const, size: 5, mtimeMs: 100_250, isLink: false }
+    const statted = (facts: ReturnType<typeof read>, stat: typeof same | undefined) =>
+      withModified(facts, new Map(statPathsOf(facts).map(path => [path, stat])))
+    const place = { top: '/work/app', prefix: '', branch: 'main' }
+
+    test('the index entries under a target are read, and each is compared with the file by size and time', () => {
+      expect(statPathsOf(read())).toEqual(['src/a.txt'])
+      expect(statted(read(), same).modifiedIn).toEqual({ src: 0 })
+      expect(statted(read(), { ...same, size: 6 }).modifiedIn).toEqual({ src: 1 })
+      expect(statted(read(), { ...same, mtimeMs: 100_251 }).modifiedIn).toEqual({ src: 1 })
+      expect(statted(read(), { ...same, isLink: true }).modifiedIn).toEqual({ src: 1 })
+      expect(statted(read(), { ...same, kind: 'dir' as never }).modifiedIn).toEqual({ src: 1 })
+      // a file the court cannot stat is unknown, never claimed changed
+      expect(statted(read(), undefined).modifiedIn).toBeUndefined()
+    })
+
+    test('a target with more index entries than the court reads leaves its changes unknown', () => {
+      const many = Array.from({ length: 201 }, (_, at) => entry(`src/f${at}`, 1)).join('')
+      expect(statPathsOf(read('', '', many))).toEqual([])
+      expect(statted(read('', '', many), same).modifiedIn).toBeUndefined()
+    })
+
+    test('precedent needs every target clean: no untracked, ignored or changed file under it', () => {
+      expect(materialOf(plan, statted(read(), same))).toEqual({
+        ...place, tracked: { src: true }, untracked: { src: 0 }, ignoredIn: { src: 0 }, modifiedIn: { src: 0 },
+      })
+      expect(materialOf(plan, statted(read('src/precious-new.ts\n'), same))).toBeUndefined()
+      expect(materialOf(plan, statted(read('', 'src/prod.env\n'), same))).toBeUndefined()
+      expect(materialOf(plan, statted(read(), { ...same, size: 17 }))).toBeUndefined()
+      expect(materialOf(plan, read())).toBeUndefined()
+    })
+
+    test('a recorded case that did not record a clean target binds nothing', () => {
+      const now = materialOf(plan, statted(read(), same))!
+      expect(isSameMaterial(now, now)).toBe(true)
+      expect(isSameMaterial({ ...place, tracked: { src: true } }, now)).toBe(false)
+      expect(isSameMaterial({ ...now, untracked: { src: 1 } }, now)).toBe(false)
+      expect(isSameMaterial({ ...now, modifiedIn: { src: 2 } }, now)).toBe(false)
+      expect(isSameMaterial(now, { ...now, ignoredIn: { src: 1 } })).toBe(false)
+    })
+
+    test('changed files under a target are named as evidence', () => {
+      expect(exhibitLinesOf({ isRepo: true, tracked: { src: true }, untracked: { src: 0 }, ignoredIn: { src: 0 }, modifiedIn: { src: 2 } })).toEqual([
+        'Exhibit A: src is tracked by git, so history keeps it.',
+        'Exhibit B: src holds 2 files changed since git last recorded them, which history does not keep.',
+      ])
+    })
   })
 })
 

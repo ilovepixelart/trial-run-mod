@@ -15,11 +15,11 @@ For each trial, the mod makes three model calls through Claude Code's own model 
 - for the judge, also the prosecution's and the defense's speeches;
 - on `/court appeal <context>`, the context you typed, in place of your latest message, for the three calls of the appeal.
 
-Claude's own words are among this evidence, so the defendant can try to sway the court; an acquittal still only hands the decision back to your permission rules. The git commands run locally and fetch nothing. These calls go wherever Claude Code sends its own model requests, under your Claude Code account and settings. The mod makes no network calls of its own and sends no telemetry.
+Claude's own words are among this evidence, so the defendant can try to sway the court; an acquittal still only hands the decision back to your permission rules. The git commands run locally and fetch nothing; the court also reads the size and time of the tracked files under a delete target (`$.fs.stat`), never their content, and sends only the count of changed ones. These calls go wherever Claude Code sends its own model requests, under your Claude Code account and settings. The mod makes no network calls of its own and sends no telemetry.
 
 ## What it keeps
 
-In Claude Code's plugin store on this machine (`$.store`), one record per case: the case number, the charged command cut to 80 characters, the charge, the verdict and the time. For precedent, also the session's project root path, the repository's path, the directory within it and the branch git reported, whether each deleted path was tracked, the count of upstream commits the branch lacked, the case an acquittal by precedent cites, and the case an appeal retried. At most the newest 200 cases are kept, plus the docket's layout version.
+In Claude Code's plugin store on this machine (`$.store`), one record per case: the case number, the charged command cut to 80 characters, the charge, the verdict and the time. For precedent, also the session's project root path, the repository's path, the directory within it and the branch git reported, whether each deleted path was tracked and how many untracked, ignored and changed files were under it, the count of upstream commits the branch lacked, the case an acquittal by precedent cites, and the case an appeal retried. At most the newest 200 cases are kept, plus the docket's layout version.
 
 Nothing else is written. Sounds (the gavel and the spoken verdict) play locally.
 

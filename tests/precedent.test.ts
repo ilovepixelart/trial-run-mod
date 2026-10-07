@@ -263,5 +263,70 @@ describe('the world changes between two identical commands', () => {
 
     expect(seen.calls).toHaveLength(3)
   })
+
+  describe('work under a tracked target', () => {
+    type Tree = { untracked: string; ignored: string; size: number }
+    const clean: Tree = { untracked: '', ignored: '', size: 5 }
+    const treeGit = (tree: () => Tree) => (argv: readonly string[]) => {
+      if (argv.includes('rev-parse')) {
+        return gitSaid(HERE)
+      }
+      if (argv.includes('--error-unmatch')) {
+        return gitSaid('src/a.txt\n')
+      }
+      if (argv.includes('--debug')) {
+        return gitSaid('src/a.txt\n  ctime: 100:0\n  mtime: 100:250000000\n  dev: 1\tino: 2\n  uid: 1\tgid: 1\n  size: 5\tflags: 0\n')
+      }
+      if (argv.includes('--ignored')) {
+        return gitSaid(tree().ignored)
+      }
+      return gitSaid(argv.includes('--others') ? tree().untracked : '')
+    }
+
+    const changes: [string, Partial<Tree>][] = [
+      ['an untracked file appears under it', { untracked: 'src/precious-new.ts\n' }],
+      ['a tracked file under it has uncommitted edits', { size: 17 }],
+      ['an ignored file appears under it', { ignored: 'src/prod.env\n' }],
+    ]
+    for (const [name, change] of changes) {
+      test(`${name}: the second rm -rf src goes to trial`, async ($, on) => {
+        mock.clock(on)
+        memoryStore(on)
+        let tree = clean
+        on('fs.stat', () => ({ value: { kind: 'file' as const, size: tree.size, mtimeMs: 100_250, isLink: false } }))
+        const seen = seatCourt(on, { ...verdictBench(ACQUITTED), git: treeGit(() => tree), root: () => '/work/app' })
+
+        await $.tool.check(check('rm -rf src'))
+        tree = { ...clean, ...change }
+        await $.tool.check(check('rm -rf src'))
+
+        expect(seen.calls).toHaveLength(6)
+      })
+    }
+
+    test('a clean tracked target still follows precedent', async ($, on) => {
+      mock.clock(on)
+      memoryStore(on)
+      on('fs.stat', () => ({ value: { kind: 'file' as const, size: 5, mtimeMs: 100_250, isLink: false } }))
+      const seen = seatCourt(on, { ...verdictBench(ACQUITTED), git: treeGit(() => clean), root: () => '/work/app' })
+
+      await $.tool.check(check('rm -rf src'))
+      await $.tool.check(check('rm -rf src'))
+
+      expect(seen.calls).toHaveLength(3)
+    })
+
+    test('a file the court cannot stat leaves the target unknown', async ($, on) => {
+      mock.clock(on)
+      memoryStore(on)
+      on('fs.stat', () => ({ deny: 'no file system here' }))
+      const seen = seatCourt(on, { ...verdictBench(ACQUITTED), git: treeGit(() => clean), root: () => '/work/app' })
+
+      await $.tool.check(check('rm -rf src'))
+      await $.tool.check(check('rm -rf src'))
+
+      expect(seen.calls).toHaveLength(6)
+    })
+  })
 })
 

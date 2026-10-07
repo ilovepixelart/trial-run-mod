@@ -136,13 +136,15 @@ describe('docket', () => {
   describe('precedent', () => {
     // where git ran: precedent compares it too
     const PLACE = { top: '/work/app', prefix: '', branch: 'main' }
+    // a delete target read clean: nothing untracked, ignored or changed under it
+    const CLEAN = (target: string) => ({ untracked: { [target]: 0 }, ignoredIn: { [target]: 0 }, modifiedIn: { [target]: 0 } })
     const heard = (number: number, verdict: CaseRecord['verdict'], over: Partial<CaseRecord> = {}): CaseRecord => ({
       ...record(number, 'recursive delete', verdict, 'rm -rf dist'),
       root: '/work/app',
-      facts: { ...PLACE, tracked: { dist: false } },
+      facts: { ...PLACE, tracked: { dist: false }, ...CLEAN('dist') },
       ...over,
     })
-    const sought = { command: 'rm -rf dist', root: '/work/app', facts: { ...PLACE, tracked: { dist: false } } }
+    const sought = { command: 'rm -rf dist', root: '/work/app', facts: { ...PLACE, tracked: { dist: false }, ...CLEAN('dist') } }
 
     test('an acquittal in the same project root on the same command line is precedent', () => {
       expect(precedentOf([heard(1, 'acquitted')], sought)?.number).toBe(1)
@@ -174,7 +176,7 @@ describe('docket', () => {
     })
 
     test('changed facts reopen the case: tracked state, or an upstream branch ahead', () => {
-      expect(precedentOf([heard(1, 'acquitted')], { ...sought, facts: { ...PLACE, tracked: { dist: true } } })).toBeUndefined()
+      expect(precedentOf([heard(1, 'acquitted')], { ...sought, facts: { ...PLACE, tracked: { dist: true }, ...CLEAN('dist') } })).toBeUndefined()
       expect(precedentOf([heard(1, 'acquitted')], { ...sought, facts: {} })).toBeUndefined()
       const push = { command: 'git push --force origin main', root: '/work/app' }
       const pushed = (behind: number | undefined) =>
@@ -205,7 +207,7 @@ describe('docket', () => {
       const [cut] = fileCase([], { command: long, charge: 'c', verdict: 'acquitted', at: 1, root: '/r', facts: {} })
       expect(cut?.command).toHaveLength(80)
       expect(precedentOf([cut!], { command: cut!.command, root: '/r', facts: {} })).toBeUndefined()
-      const known = { ...PLACE, tracked: { x: false } }
+      const known = { ...PLACE, tracked: { x: false }, ...CLEAN('x') }
       const [whole] = fileCase([], { command: 'rm -rf x', charge: 'c', verdict: 'acquitted', at: 1, root: '/r', facts: known })
       expect(precedentOf([whole!], { command: 'rm -rf x', root: '/r', facts: known })?.number).toBe(1)
     })
@@ -220,6 +222,14 @@ describe('docket', () => {
       ])
       expect(facts?.root).toBe('/r')
       expect(facts?.facts).toEqual({ tracked: { b: true } })
+      // the counts that keep a target clean are read back, whole counts only
+      const [counted] = casesOf([
+        {
+          number: 2, command: 'rm', charge: 'c', verdict: 'acquitted', at: 1,
+          facts: { tracked: { a: true }, untracked: { a: 0, b: -1 }, ignoredIn: { a: 0, b: '0' }, modifiedIn: { a: 0, b: 1.5 } },
+        },
+      ])
+      expect(counted?.facts).toEqual({ tracked: { a: true }, untracked: { a: 0 }, ignoredIn: { a: 0 }, modifiedIn: { a: 0 } })
       const [cited] = casesOf([{ number: 3, command: 'rm', charge: 'c', verdict: 'acquitted', at: 1, precedent: 1, appeal: 2 }])
       expect(cited).toEqual({ number: 3, command: 'rm', charge: 'c', verdict: 'acquitted', at: 1, precedent: 1, appeal: 2 })
     })

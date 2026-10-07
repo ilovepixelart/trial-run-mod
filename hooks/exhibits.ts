@@ -1,3 +1,5 @@
+import type { FsStat } from 'claude-code'
+
 import { chargedOf, isSimpleCommand } from './risky'
 
 /**
@@ -36,7 +38,7 @@ export const GIT_ENV = {
   LC_ALL: 'C',
 } as const
 
-export type ExhibitKind = 'inside' | 'behind' | 'ahead' | 'authors' | 'pushconfig' | 'tracked' | 'untracked' | 'ignored'
+export type ExhibitKind = 'inside' | 'behind' | 'ahead' | 'authors' | 'pushconfig' | 'tracked' | 'untracked' | 'ignored' | 'indexed'
 
 /**
  * One read-only git command the court runs for a fact, by argument vector.
@@ -72,16 +74,31 @@ export type Facts = {
   ignored?: number
   /** Ignored files under each delete target. */
   ignoredIn?: Record<string, number>
+  /** The index entries under each delete target. */
+  indexed?: Record<string, IndexEntry[]>
+  /** Tracked files under each delete target whose size or time differs from the index. */
+  modifiedIn?: Record<string, number>
 }
+
+/**
+ * One file as the index last recorded it.
+ */
+export type IndexEntry = { path: string; size: number; mtimeMs: number }
 
 /**
  * The facts precedent compares: where git ran (repository, directory,
  * branch), whether the upstream branch moved, and whether each target is
  * still tracked.
  */
-export type MaterialFacts = Pick<Facts, 'top' | 'prefix' | 'branch' | 'behind' | 'tracked'>
+export type MaterialFacts = Pick<Facts, 'top' | 'prefix' | 'branch' | 'behind' | 'tracked' | 'untracked' | 'ignoredIn' | 'modifiedIn'>
 
 const MAX_TARGETS = 3
+
+/**
+ * The most index entries the court compares with the files: one stat
+ * each, within the exhibits' bound. A target with more is unknown.
+ */
+const MAX_INDEXED = 200
 const NAME_CELLS = 60
 
 const git = (...args: string[]): readonly string[] => ['git', ...GIT_HARDENING, ...args]
@@ -190,6 +207,9 @@ export const planOf = (command: string): ExhibitQuery[] => {
               query('tracked', git('ls-files', '--error-unmatch', '--', target), target),
               query('untracked', git('ls-files', '--others', '--exclude-standard', '--', target), target),
               query('ignored', git('ls-files', '--others', '--ignored', '--exclude-standard', '--', target), target),
+              // the index's own record of each file, never the files: every git
+              // that compares them can run the repository's filters
+              query('indexed', git('ls-files', '--debug', '--', target), target),
             ]),
           ]
     case 'git-clean':
@@ -205,6 +225,27 @@ export const planOf = (command: string): ExhibitQuery[] => {
     default:
       return []
   }
+}
+
+/**
+ * The entries `ls-files --debug` prints: each path, then its index stat on
+ * indented lines, of which the court keeps the size and the mtime.
+ */
+const entriesOf = (stdout: string): IndexEntry[] => {
+  const entries: IndexEntry[] = []
+  for (const line of stdout.split('\n')) {
+    const mtime = /^\s+mtime: (\d+):(\d+)$/.exec(line)
+    const size = /^\s+size: (\d+)\b/.exec(line)
+    const last = entries.at(-1)
+    if (line !== '' && !/^\s/.test(line)) {
+      entries.push({ path: line, size: Number.NaN, mtimeMs: Number.NaN })
+    } else if (mtime && last) {
+      last.mtimeMs = Number(mtime[1]) * 1000 + Number(mtime[2]) / 1e6
+    } else if (size && last) {
+      last.size = Number(size[1])
+    }
+  }
+  return entries
 }
 
 const countOf = (stdout: string) => stdout.split('\n').filter(line => line.trim() !== '').length
@@ -262,6 +303,11 @@ export const factsOf = (plan: readonly ExhibitQuery[], results: readonly Exhibit
           facts.untracked = { ...facts.untracked, [one.target ?? '.']: countOf(out) }
         }
         break
+      case 'indexed':
+        if (result.exitCode === 0 && one.target !== undefined) {
+          facts.indexed = { ...facts.indexed, [one.target]: entriesOf(result.stdout) }
+        }
+        break
       case 'ignored':
         if (result.exitCode === 0 && one.target !== undefined) {
           facts.ignoredIn = { ...facts.ignoredIn, [one.target]: countOf(out) }
@@ -279,17 +325,54 @@ export const factsOf = (plan: readonly ExhibitQuery[], results: readonly Exhibit
     untracked: facts.untracked,
     ignored: facts.ignoredIn,
   }
-  const isEveryTargetRead = targets.every(one => readFor[one.kind]?.[one.target ?? ''] !== undefined)
+  const isEveryTargetRead = targets
+    .filter(one => one.kind in readFor)
+    .every(one => readFor[one.kind]?.[one.target ?? ''] !== undefined)
   if (!isEveryTargetRead) {
     delete facts.tracked
     delete facts.untracked
     delete facts.ignoredIn
+    delete facts.indexed
   }
   if (!isPushPlain) {
     delete facts.behind
     delete facts.upstreamAuthors
   }
   return facts.isRepo === false ? { isRepo: false } : facts
+}
+
+/**
+ * The files to stat for the targets' changes: every index entry under
+ * them, or none when there are more than the court reads, which leaves
+ * every target's changes unknown.
+ */
+export const statPathsOf = (facts: Facts): string[] => {
+  const paths = Object.values(facts.indexed ?? {}).flatMap(entries => entries.map(entry => entry.path))
+  return paths.length > MAX_INDEXED ? [] : paths
+}
+
+const isUnchanged = (entry: IndexEntry, stat: FsStat) =>
+  !stat.isLink &&
+  stat.kind === 'file' &&
+  stat.size === entry.size &&
+  Math.floor(stat.mtimeMs) === Math.floor(entry.mtimeMs)
+
+/**
+ * The facts with each target's changed files counted: an index entry whose
+ * file differs in size or time, is a link, or is not a file. A target with
+ * an entry the court could not stat, or entries it did not read, is left
+ * unknown, never claimed changed.
+ *
+ * @param stats each path's stat, undefined where it could not be read
+ */
+export const withModified = (facts: Facts, stats: ReadonlyMap<string, FsStat | undefined>): Facts => {
+  const counted = Object.entries(facts.indexed ?? {}).flatMap(([target, entries]) => {
+    const statted = entries.map(entry => [entry, stats.get(entry.path)] as const)
+    return statted.some(([, stat]) => stat === undefined)
+      ? []
+      : [[target, statted.filter(([entry, stat]) => stat === undefined || !isUnchanged(entry, stat)).length] as const]
+  })
+  return counted.length === 0 ? facts : { ...facts, modifiedIn: Object.fromEntries(counted) }
 }
 
 /**
@@ -341,6 +424,11 @@ export const exhibitLinesOf = (facts: Facts): string[] => {
       said.push(`${sanitizedOf(target, NAME_CELLS)} holds ${plural(count, 'untracked file', 'untracked files')}.`)
     }
   }
+  for (const [target, count] of Object.entries(facts.modifiedIn ?? {})) {
+    if (count > 0) {
+      said.push(`${sanitizedOf(target, NAME_CELLS)} holds ${plural(count, 'file', 'files')} changed since git last recorded them, which history does not keep.`)
+    }
+  }
   for (const [target, count] of Object.entries(facts.ignoredIn ?? {})) {
     if (count > 0) {
       said.push(`${sanitizedOf(target, NAME_CELLS)} holds ${plural(count, 'ignored file', 'ignored files')}, which history does not keep.`)
@@ -366,13 +454,18 @@ export const materialOf = (plan: readonly ExhibitQuery[], facts: Facts): Materia
   const isRead = (one: ExhibitQuery) =>
     one.kind === 'behind' ? facts.behind !== undefined : one.target !== undefined && facts.tracked?.[one.target] !== undefined
   const isPlaced = facts.top !== undefined && facts.prefix !== undefined && facts.branch !== undefined
-  return asked.length > 0 && facts.isRepo === true && isPlaced && asked.every(isRead) ? materialFactsOf(facts) : undefined
+  return asked.length > 0 && facts.isRepo === true && isPlaced && asked.every(isRead) && isEveryTargetClean(facts)
+    ? materialFactsOf(facts)
+    : undefined
 }
 
 /**
  * The facts precedent compares.
  */
 export const materialFactsOf = (facts: Facts): MaterialFacts => ({
+  ...(facts.untracked === undefined ? {} : { untracked: facts.untracked }),
+  ...(facts.ignoredIn === undefined ? {} : { ignoredIn: facts.ignoredIn }),
+  ...(facts.modifiedIn === undefined ? {} : { modifiedIn: facts.modifiedIn }),
   ...(facts.top === undefined ? {} : { top: facts.top }),
   ...(facts.prefix === undefined ? {} : { prefix: facts.prefix }),
   ...(facts.branch === undefined ? {} : { branch: facts.branch }),
@@ -384,6 +477,16 @@ const trackedOf = (facts: MaterialFacts) =>
   JSON.stringify(Object.entries(facts.tracked ?? {}).toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
 
 const isKnown = (facts: MaterialFacts) => facts.behind !== undefined || Object.keys(facts.tracked ?? {}).length > 0
+
+/**
+ * Whether every delete target was read clean: no untracked, ignored or
+ * changed file under it, each count known. A target with any of them holds
+ * work a delete loses that its tracked state does not show.
+ */
+const isEveryTargetClean = (facts: MaterialFacts) =>
+  Object.keys(facts.tracked ?? {}).every(
+    target => facts.untracked?.[target] === 0 && facts.ignoredIn?.[target] === 0 && facts.modifiedIn?.[target] === 0,
+  )
 
 const isPlacedNow = (facts: MaterialFacts) =>
   facts.top !== undefined && facts.prefix !== undefined && facts.branch !== undefined
@@ -399,6 +502,8 @@ const isPlacedNow = (facts: MaterialFacts) =>
 export const isSameMaterial = (then: MaterialFacts, now: MaterialFacts): boolean =>
   isPlacedNow(now) &&
   isKnown(now) &&
+  isEveryTargetClean(then) &&
+  isEveryTargetClean(now) &&
   then.top === now.top &&
   then.prefix === now.prefix &&
   then.branch === now.branch &&

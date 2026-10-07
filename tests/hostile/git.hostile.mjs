@@ -190,6 +190,8 @@ for (const [name, configOf] of [
     assert.equal(behind?.stdout.trim(), '1')
     assert.equal(outputs.find(one => one.kind === 'tracked' && one.target === '-rf')?.status, 0)
     assert.equal(outputs.find(one => one.kind === 'tracked' && one.target === '--output=pwned-output')?.status, 1)
+    // the index's record of src, read without touching the files
+    assert.match(outputs.find(one => one.kind === 'indexed' && one.target === 'src')?.stdout ?? '', /^src\/b\.txt\n\s+ctime:/)
     // only the upstream commits this branch lacks are counted, not the shared ones
     assert.equal(outputs.find(one => one.kind === 'authors')?.stdout.trim(), 'u@example.com')
   })

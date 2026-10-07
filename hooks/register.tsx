@@ -4,7 +4,7 @@ import type { EngineInterface, Register, ResultOf } from 'claude-code'
 import type { CourtRole, CourtTrial, CourtVerdict } from '../types'
 import { contemptKeyOf } from './contempt'
 import { DOCKET_LAYOUT, casesOf, docketOf, fileCase, isReadableLayout, nextCaseNumber, precedentOf, priorsOf } from './docket'
-import { GIT_ENV, exhibitLinesOf, factsOf, materialOf, planOf } from './exhibits'
+import { GIT_ENV, exhibitLinesOf, factsOf, materialOf, planOf, statPathsOf, withModified } from './exhibits'
 import type { ExhibitResult, Facts } from './exhibits'
 import type { CaseRecord } from './docket'
 import { gaugeOf } from './gauge'
@@ -148,8 +148,18 @@ const factsFrom = async ($: EngineInterface, command: string): Promise<Facts> =>
       ]),
     ),
   )
+  const facts = factsOf(plan, results)
+  // each indexed file against the index, within the same bound; a file
+  // that will not stat, or a bound that runs out, leaves the change unknown
+  const paths = statPathsOf(facts)
+  const stats = await Promise.race([
+    Promise.all(paths.map(path => $.fs.stat(path).catch(() => undefined))).then(
+      all => new Map(paths.map((path, at) => [path, all[at]])),
+    ),
+    bound.then(() => undefined),
+  ])
   timer.abort()
-  return factsOf(plan, results)
+  return stats === undefined ? facts : withModified(facts, stats)
 }
 
 /**

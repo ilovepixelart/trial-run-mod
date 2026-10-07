@@ -178,8 +178,15 @@ const factsRead = (stored: unknown): MaterialFacts | undefined => {
   const placed = (['top', 'prefix', 'branch'] as const).flatMap(key =>
     typeof stored[key] === 'string' ? [[key, stored[key]] as const] : [],
   )
+  const counts = (['untracked', 'ignoredIn', 'modifiedIn'] as const).flatMap(key => {
+    const value = stored[key]
+    return isObject(value)
+      ? [[key, Object.fromEntries(Object.entries(value).filter(([, count]) => Number.isInteger(count) && (count as number) >= 0))] as const]
+      : []
+  })
   return {
     ...Object.fromEntries(placed),
+    ...(Object.fromEntries(counts) as Pick<MaterialFacts, 'untracked' | 'ignoredIn' | 'modifiedIn'>),
     ...(Number.isInteger(behind) && (behind as number) >= 0 ? { behind: behind as number } : {}),
     ...(isObject(tracked)
       ? { tracked: Object.fromEntries(Object.entries(tracked).filter(([, value]) => typeof value === 'boolean')) as Record<string, boolean> }
