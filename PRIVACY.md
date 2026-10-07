@@ -12,13 +12,14 @@ For each trial, the mod makes three model calls through Claude Code's own model 
 - the command as written;
 - the exhibits: counts and states the court read from git on this machine (see "Exhibits" in the README), such as how many commits the upstream branch has that yours lacks and by how many distinct authors, or whether a path is tracked. Author addresses are counted locally and never sent; a path is named as the command names it, cut to 60 characters with control characters removed;
 - your latest message and Claude's latest message, each cut to its last 600 characters;
-- for the judge, also the prosecution's and the defense's speeches.
+- for the judge, also the prosecution's and the defense's speeches;
+- on `/court appeal <context>`, the context you typed, in place of your latest message, for the three calls of the appeal.
 
 The git commands run locally and fetch nothing. These calls go wherever Claude Code sends its own model requests, under your Claude Code account and settings. The mod makes no network calls of its own and sends no telemetry.
 
 ## What it keeps
 
-In Claude Code's plugin store on this machine (`$.store`), one record per case: the case number, the charged command cut to 80 characters, the charge, the verdict and the time. For precedent, also the session's project root path, whether each deleted path was tracked, the count of upstream commits the branch lacked, and the case an acquittal by precedent cites. At most the newest 200 cases are kept, plus the docket's layout version.
+In Claude Code's plugin store on this machine (`$.store`), one record per case: the case number, the charged command cut to 80 characters, the charge, the verdict and the time. For precedent, also the session's project root path, whether each deleted path was tracked, the count of upstream commits the branch lacked, the case an acquittal by precedent cites, and the case an appeal retried. At most the newest 200 cases are kept, plus the docket's layout version.
 
 Nothing else is written. Sounds (the gavel and the spoken verdict) play locally.
 

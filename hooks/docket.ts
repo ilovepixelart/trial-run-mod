@@ -26,6 +26,10 @@ export type CaseRecord = {
    * The case an acquittal by precedent cites.
    */
   precedent?: number
+  /**
+   * The conviction this case heard on appeal.
+   */
+  appeal?: number
 }
 
 export type RapSheetLine = { charge: string; count: number }
@@ -211,6 +215,7 @@ export const casesOf = (stored: unknown): CaseRecord[] =>
             ...(typeof c.root === 'string' ? { root: c.root } : {}),
             ...(facts === undefined ? {} : { facts }),
             ...(typeof c.precedent === 'number' ? { precedent: c.precedent } : {}),
+            ...(typeof c.appeal === 'number' ? { appeal: c.appeal } : {}),
           }
         })
     : []

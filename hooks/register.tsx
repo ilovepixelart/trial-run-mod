@@ -14,7 +14,7 @@ import { chargeOf, isSimpleCommand } from './risky'
 import { sentenceFor } from './sentence'
 import { GAVEL, SCALES, segmentsOf, stampFor } from './stamp'
 import { speechRequestOf, spokenOf, testimonyOf, tightOf, tryCase } from './trial'
-import type { Speak } from './trial'
+import type { Case, Speak } from './trial'
 import { contemptOf, sentenceOf } from './verdict'
 import type { Ruling } from './verdict'
 
@@ -164,6 +164,77 @@ const rootFrom = async ($: EngineInterface): Promise<string | undefined> => {
   }
 }
 
+/**
+ * How each role is heard: through `$.model.complete`, nothing when the
+ * reply is refused or empty.
+ */
+const speakerOf =
+  ($: EngineInterface): Speak =>
+  async (role, prompt, maxTokens) => {
+    const reply = await $.model.complete(speechRequestOf(role, prompt, maxTokens))
+    const text = reply.isAnswered ? reply.text.trim() : ''
+    return text === '' ? undefined : text
+  }
+
+/**
+ * What the court remembers this conversation: the commands it convicted, by
+ * contempt key, with their case, and the latest conviction, which
+ * `/court appeal` retries.
+ */
+type Memory = {
+  convicted: Map<string, number>
+  appealable: { command: string; charge: Case['charge']; number: number } | undefined
+}
+
+/**
+ * Retries the latest conviction with the person's context as their words,
+ * files it marked as an appeal of that case, and lifts contempt for the
+ * command when the appeal is upheld.
+ */
+const appealWith = async ($: EngineInterface, memory: Memory, context: string): Promise<string> => {
+  const appealed = memory.appealable
+  if (appealed === undefined) {
+    return 'There is no conviction to appeal.'
+  }
+  if (context === '') {
+    return 'Tell the court what it missed: /court appeal <context>.'
+  }
+  const timer = new AbortController()
+  const heard = async (): Promise<Ruling> => {
+    const [testimony, facts] = await Promise.all([testimonyFrom($), factsFrom($, appealed.command)])
+    const one: Case = { ...testimony, command: appealed.command, charge: appealed.charge, plea: context, exhibits: exhibitLinesOf(facts) }
+    return tryCase(one, speakerOf($), () => undefined)
+  }
+  const ruling = await Promise.race<Ruling>([
+    heard().catch(() => ({ kind: 'hung', reason: 'the court fell into disorder' })),
+    $.clock
+      .sleep(DEADLINE_MS, { signal: timer.signal })
+      .then((): Ruling => ({ kind: 'hung', reason: 'the court ran out of time' }), () => new Promise<Ruling>(() => undefined)),
+  ])
+  timer.abort()
+  const number = nextCaseNumber(await casesFrom($))
+  await fileOnDocket($, {
+    command: appealed.charge.command,
+    charge: appealed.charge.label,
+    verdict: ruling.kind,
+    at: Date.now(),
+    appeal: appealed.number,
+  })
+  const key = contemptKeyOf(appealed.charge.command)
+  const said = `${spokenOf(ruling.reason)} Filed as case ${caseNumberOf(number)}.`
+  if (ruling.kind === 'acquitted') {
+    memory.convicted.delete(key)
+    memory.appealable = undefined
+    return `Appeal of case ${caseNumberOf(appealed.number)} upheld: NOT GUILTY. ${said} Contempt is lifted; a retry goes to trial again.`
+  }
+  if (ruling.kind === 'guilty') {
+    memory.convicted.set(key, number)
+    memory.appealable = { ...appealed, number }
+    return `Appeal of case ${caseNumberOf(appealed.number)} denied: GUILTY. ${said}`
+  }
+  return `Appeal of case ${caseNumberOf(appealed.number)}: MISTRIAL. ${said} The conviction stands.`
+}
+
 const quietly = (work: Promise<unknown>) => {
   work.catch(() => undefined)
 }
@@ -275,8 +346,8 @@ const runsOf = (strip: readonly CourtVerdict['kind'][]) =>
 export const register: Register = on => {
   let lastId = 0
   const objections = new Map<number, (ruling: Ruling) => void>()
-  // the commands convicted this session, by contempt key, with their case
-  const convicted = new Map<string, number>()
+  const memory: Memory = { convicted: new Map<string, number>(), appealable: undefined }
+  const { convicted } = memory
 
   const rule = (id: number, ruling: Ruling) => {
     objections.get(id)?.(ruling)
@@ -284,9 +355,11 @@ export const register: Register = on => {
 
   on('session.start', async ($, e, next) => {
     convicted.clear()
+    memory.appealable = undefined
     await $.command.register({
       name: 'court',
-      description: 'Open the courtroom pane (the last trial), or `/court docket` for every case heard',
+      description:
+        'Open the courtroom pane (the last trial), `/court docket` for every case heard, or `/court appeal <context>` to retry the latest conviction',
     })
     return next(e)
   })
@@ -295,10 +368,15 @@ export const register: Register = on => {
   // session.start, so contempt is forgiven here too; a compaction is not one
   on('classic.SessionStart', { source: ['clear', 'resume', 'fork'] }, async ($, e, next) => {
     convicted.clear()
+    memory.appealable = undefined
     return next(e)
   })
 
   on('command.run', { command: 'court' }, async ($, e) => {
+    const [verb = '', ...rest] = e.args.trim().split(/\s+/)
+    if (verb === 'appeal') {
+      return { text: await appealWith($, memory, rest.join(' ')) }
+    }
     if (e.args.trim() === 'docket') {
       await $.ui.open({ id: DOCKET_PANE, title: 'trial-run · docket', columns: DOCK_COLUMNS, rows: INLINE_ROWS })
       return { text: 'The docket is open.' }
@@ -418,11 +496,7 @@ export const register: Register = on => {
           }
         }),
       )
-    const speak: Speak = async (role, prompt, maxTokens) => {
-      const reply = await $.model.complete(speechRequestOf(role, prompt, maxTokens))
-      const text = reply.isAnswered ? reply.text.trim() : ''
-      return text === '' ? undefined : text
-    }
+    const speak = speakerOf($)
     const timer = new AbortController()
     const never = new Promise<Ruling>(() => undefined)
 
@@ -460,6 +534,7 @@ export const register: Register = on => {
     objections.delete(id)
     if (ruling.kind === 'guilty') {
       convicted.set(contemptKey, opening.number)
+      memory.appealable = { command, charge, number: opening.number }
     }
 
     const penalty = ruling.kind === 'guilty' ? sentenceFor(charge.id, charge.command) : undefined

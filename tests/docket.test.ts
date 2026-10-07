@@ -210,6 +210,8 @@ describe('docket', () => {
       ])
       expect(facts?.root).toBe('/r')
       expect(facts?.facts).toEqual({ tracked: { b: true } })
+      const [cited] = casesOf([{ number: 3, command: 'rm', charge: 'c', verdict: 'acquitted', at: 1, precedent: 1, appeal: 2 }])
+      expect(cited).toEqual({ number: 3, command: 'rm', charge: 'c', verdict: 'acquitted', at: 1, precedent: 1, appeal: 2 })
     })
   })
 })
