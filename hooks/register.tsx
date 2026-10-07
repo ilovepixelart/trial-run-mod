@@ -247,6 +247,13 @@ export const register: Register = on => {
     return next(e)
   })
 
+  // /clear, /resume and /branch start a new conversation without firing
+  // session.start, so contempt is forgiven here too; a compaction is not one
+  on('classic.SessionStart', { source: ['clear', 'resume', 'fork'] }, async ($, e, next) => {
+    convicted.clear()
+    return next(e)
+  })
+
   on('command.run', { command: 'court' }, async ($, e) => {
     if (e.args.trim() === 'docket') {
       await $.ui.open({ id: DOCKET_PANE, title: 'trial-run · docket', columns: DOCK_COLUMNS, rows: INLINE_ROWS })

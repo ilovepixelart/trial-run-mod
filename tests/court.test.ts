@@ -378,6 +378,56 @@ describe('court', () => {
     expect(seen.calls.length).toBeGreaterThan(callsBefore)
   })
 
+  test('/clear, /resume and /branch forgive contempt', async ($, on) => {
+    mock.clock(on)
+    mock.store(on)
+    on('classic.SessionStart', () => ({}))
+    const seen = seatCourt(on, verdictBench(GUILTY))
+    for (const source of ['clear', 'resume', 'fork'] as const) {
+      const command = `git push --force origin ${source}`
+
+      await $.tool.check(check(command))
+      await $.classic.SessionStart({ source })
+      const callsBefore = seen.calls.length
+      const again = await $.tool.check(check(command))
+
+      expect(again.reason, source).toMatch(/^Objection!/)
+      expect(seen.calls.length, source).toBeGreaterThan(callsBefore)
+    }
+  })
+
+  test('after /clear the court and the docket still show the cases on record', async ($, on) => {
+    mock.clock(on)
+    mock.store(on, {
+      cases: [{ number: 7, command: 'git push -f', charge: 'force push', verdict: 'guilty', at: 1 }],
+    })
+    on('classic.SessionStart', () => ({}))
+    seatCourt(on, verdictBench(GUILTY))
+
+    await $.classic.SessionStart({ source: 'clear' })
+
+    const pane = await $.ui.mount({ ...PANE_SITE, surface: 'terminal' })
+    expect(await pane.find({ text: /#0007/ })).toBeDefined()
+    expect(await pane.find({ text: /No one is on trial/ })).toBeUndefined()
+    const docket = await $.ui.mount({ ...DOCKET_SITE, surface: 'terminal' })
+    expect(await docket.find({ text: /1 case heard|1 cases heard/ })).toBeDefined()
+  })
+
+  test('a compaction does not forgive contempt', async ($, on) => {
+    mock.clock(on)
+    mock.store(on)
+    on('classic.SessionStart', () => ({}))
+    const seen = seatCourt(on, verdictBench(GUILTY))
+
+    await $.tool.check(check('git push --force origin main'))
+    await $.classic.SessionStart({ source: 'compact' })
+    const callsBefore = seen.calls.length
+    const again = await $.tool.check(check('git push --force origin main'))
+
+    expect(again.reason).toMatch(/^Contempt of court!/)
+    expect(seen.calls.length).toBe(callsBefore)
+  })
+
   test('the header numbers the case and counts prior convictions on the charge', async ($, on) => {
     mock.clock(on)
     mock.store(on, {

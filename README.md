@@ -80,7 +80,7 @@ A charge with no entry gets no sentence; the court does not invent one.
 
 ## Contempt of court
 
-Retry a convicted command in the same session and the court does not sit again: the retry is denied at once as `✕ CONTEMPT`, citing the case that convicted it, with no model call. Same means the same simple command once whitespace and the order of short flags are set aside (`rm -rf src` and `rm -fr src` are the same; `rm -rf dist` is not). Contempt is on the docket as a conviction. A new session starts with a clean slate.
+Retry a convicted command in the same session and the court does not sit again: the retry is denied at once as `✕ CONTEMPT`, citing the case that convicted it, with no model call. Same means the same simple command once whitespace and the order of short flags are set aside (`rm -rf src` and `rm -fr src` are the same; `rm -rf dist` is not). Contempt is on the docket as a conviction. A new conversation starts with a clean slate: a new session, `/clear`, `/resume` or `/branch`, but not a compaction.
 
 ## On a narrow terminal
 
