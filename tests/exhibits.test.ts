@@ -104,7 +104,7 @@ describe('exhibits', () => {
       }
     }
     expect(planOf('rm -rf -- -rf --output=/tmp/x').map(query => query.target).filter(Boolean)).toEqual([
-      '-rf', '-rf', '--output=/tmp/x', '--output=/tmp/x',
+      '-rf', '-rf', '-rf', '--output=/tmp/x', '--output=/tmp/x', '--output=/tmp/x',
     ])
   })
 
@@ -112,7 +112,7 @@ describe('exhibits', () => {
     const kinds = (command: string) => planOf(command).map(query => query.kind)
     expect(kinds('git push --force origin main')).toEqual(['inside', 'behind', 'authors', 'pushconfig'])
     expect(kinds('git reset --hard HEAD~3')).toEqual(['inside', 'ahead'])
-    expect(kinds('rm -rf src')).toEqual(['inside', 'tracked', 'untracked'])
+    expect(kinds('rm -rf src')).toEqual(['inside', 'tracked', 'untracked', 'ignored'])
     // more targets than the court reads: none are read, never a partial picture
     expect(kinds('rm -rf a b c d')).toEqual(['inside'])
     expect(kinds('git clean -fd')).toEqual(['inside', 'untracked'])
@@ -128,17 +128,20 @@ describe('exhibits', () => {
     expect(facts).toEqual({ isRepo: true, behind: 3, upstreamAuthors: 2 })
 
     const deleted = planOf('rm -rf src')
-    expect(factsOf(deleted, [ran(0, 'true\n'), ran(1), ran(0, 'src/a\nsrc/b\n')])).toEqual({
+    expect(factsOf(deleted, [ran(0, 'true\n'), ran(1), ran(0, 'src/a\nsrc/b\n'), ran(0, '')])).toEqual({
       isRepo: true,
       tracked: { src: false },
       untracked: { src: 2 },
+      ignoredIn: { src: 0 },
     })
-    expect(factsOf(deleted, [ran(0, 'true\n'), ran(0, 'src/a\n'), ran(0, '')])).toEqual({
+    expect(factsOf(deleted, [ran(0, 'true\n'), ran(0, 'src/a\n'), ran(0, ''), ran(0, 'src/prod.env\n')])).toEqual({
       isRepo: true,
       tracked: { src: true },
       untracked: { src: 0 },
+      ignoredIn: { src: 1 },
     })
-    expect(factsOf(deleted, [ran(0, 'true\n'), ran(128), ran(128)])).toEqual({ isRepo: true })
+    expect(factsOf(deleted, [ran(0, 'true\n'), ran(128), ran(128), ran(128)])).toEqual({ isRepo: true })
+    expect(factsOf(deleted, [ran(0, 'true\n'), ran(0, 'src/a\n'), ran(0, ''), ran(128)])).toEqual({ isRepo: true })
     expect(factsOf(plan, [undefined, ran(128, ''), ran(0, 'not a number')])).toEqual({})
     expect(factsOf(plan, [ran(128), undefined, undefined])).toEqual({ isRepo: false })
     expect(factsOf(plan, [ran(128), ran(0, '3\n'), ran(0, 'a@x\n')])).toEqual({ isRepo: false })
@@ -169,6 +172,15 @@ describe('exhibits', () => {
       'Exhibit A: src is tracked by git, so history keeps it.',
       'Exhibit B: tmpx is not tracked by git, so history does not keep it.',
       'Exhibit C: tmpx holds 4 untracked files.',
+    ])
+    // ignored files under a target are named: a delete takes them, and history never had them
+    expect(exhibitLinesOf({ isRepo: true, tracked: { src: true }, untracked: { src: 0 }, ignoredIn: { src: 1 } })).toEqual([
+      'Exhibit A: src is tracked by git, so history keeps it.',
+      'Exhibit B: src holds 1 ignored file, which history does not keep.',
+    ])
+    expect(exhibitLinesOf({ isRepo: true, tracked: { a: false }, untracked: { a: 2 }, ignoredIn: { a: 0 } })).toEqual([
+      'Exhibit A: a is not tracked by git, so history does not keep it.',
+      'Exhibit B: a holds 2 untracked files.',
     ])
     expect(exhibitLinesOf({ isRepo: true, untracked: { '.': 5 }, ignored: 9 })).toEqual([
       'Exhibit A: the repository holds 5 untracked files.',
@@ -274,29 +286,31 @@ describe('exhibits', () => {
     }
     expect(planOf('rm -rf a b c d').map(query => query.kind)).toEqual(['inside'])
     expect(planOf('rm -rf build/').map(query => query.kind)).toEqual(['inside'])
-    expect(planOf('rm -rf -- -x').map(query => query.target)).toEqual([undefined, '-x', '-x'])
-    expect(planOf('rm -rf node_modules').map(query => query.kind)).toEqual(['inside', 'tracked', 'untracked'])
+    expect(planOf('rm -rf -- -x').map(query => query.target)).toEqual([undefined, '-x', '-x', '-x'])
+    expect(planOf('rm -rf node_modules').map(query => query.kind)).toEqual(['inside', 'tracked', 'untracked', 'ignored'])
   })
 
   test('one unread target removes every target fact', () => {
     const plan = planOf('rm -rf a b')
-    expect(factsOf(plan, [ran(0, 'true\n'), ran(0, 'a\n'), ran(0, ''), ran(128), ran(0, '')])).toEqual({ isRepo: true })
-    expect(factsOf(plan, [ran(0, 'true\n'), ran(0, 'a\n'), ran(0, ''), ran(1), undefined])).toEqual({ isRepo: true })
-    expect(factsOf(plan, [ran(0, 'true\n'), ran(0, 'a\n'), ran(0, ''), ran(1), ran(0, 'b/x\n')])).toEqual({
+    expect(factsOf(plan, [ran(0, 'true\n'), ran(0, 'a\n'), ran(0, ''), ran(0, ''), ran(128), ran(0, ''), ran(0, '')])).toEqual({ isRepo: true })
+    expect(factsOf(plan, [ran(0, 'true\n'), ran(0, 'a\n'), ran(0, ''), ran(0, ''), ran(1), undefined, ran(0, '')])).toEqual({ isRepo: true })
+    expect(factsOf(plan, [ran(0, 'true\n'), ran(0, 'a\n'), ran(0, ''), ran(0, ''), ran(1), ran(0, 'b/x\n'), undefined])).toEqual({ isRepo: true })
+    expect(factsOf(plan, [ran(0, 'true\n'), ran(0, 'a\n'), ran(0, ''), ran(0, ''), ran(1), ran(0, 'b/x\n'), ran(0, 'b/y.log\n')])).toEqual({
       isRepo: true,
       tracked: { a: true, b: false },
       untracked: { a: 0, b: 1 },
+      ignoredIn: { a: 0, b: 1 },
     })
   })
 
   test('the repository, the directory within it and the branch are read with the first query', () => {
     const plan = planOf('rm -rf build')
-    expect(factsOf(plan, [ran(0, 'true\n/work/app\nsub/\nmain\n'), ran(1), ran(0, '')])).toEqual({
-      isRepo: true, top: '/work/app', prefix: 'sub/', branch: 'main', tracked: { build: false }, untracked: { build: 0 },
+    expect(factsOf(plan, [ran(0, 'true\n/work/app\nsub/\nmain\n'), ran(1), ran(0, ''), ran(0, '')])).toEqual({
+      isRepo: true, top: '/work/app', prefix: 'sub/', branch: 'main', tracked: { build: false }, untracked: { build: 0 }, ignoredIn: { build: 0 },
     })
-    expect(factsOf(plan, [ran(0, 'true\n/work/app\n\nmain\n'), ran(1), ran(0, '')]).prefix).toBe('')
-    expect(factsOf(plan, [ran(0, 'true\n'), ran(1), ran(0, '')]).top).toBeUndefined()
-    expect(factsOf(plan, [ran(0, 'true\n\n\nmain\n'), ran(1), ran(0, '')]).top).toBeUndefined()
+    expect(factsOf(plan, [ran(0, 'true\n/work/app\n\nmain\n'), ran(1), ran(0, ''), ran(0, '')]).prefix).toBe('')
+    expect(factsOf(plan, [ran(0, 'true\n'), ran(1), ran(0, ''), ran(0, '')]).top).toBeUndefined()
+    expect(factsOf(plan, [ran(0, 'true\n\n\nmain\n'), ran(1), ran(0, ''), ran(0, '')]).top).toBeUndefined()
   })
 
   test('a remote whose config rewrites or mirrors pushes leaves the push unknown', () => {
@@ -310,7 +324,7 @@ describe('exhibits', () => {
 
   test('a detached HEAD names no branch, so the place is unknown', () => {
     const plan = planOf('rm -rf build')
-    const facts = factsOf(plan, [ran(0, 'true\n/work/app\n\nHEAD\n'), ran(1), ran(0, '')])
+    const facts = factsOf(plan, [ran(0, 'true\n/work/app\n\nHEAD\n'), ran(1), ran(0, ''), ran(0, '')])
     expect(facts.branch).toBeUndefined()
     expect(facts.top).toBeUndefined()
     expect(materialOf(plan, facts)).toBeUndefined()

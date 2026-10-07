@@ -70,6 +70,8 @@ export type Facts = {
   untracked?: Record<string, number>
   /** Ignored files in the whole repository. */
   ignored?: number
+  /** Ignored files under each delete target. */
+  ignoredIn?: Record<string, number>
 }
 
 /**
@@ -187,6 +189,7 @@ export const planOf = (command: string): ExhibitQuery[] => {
             ...readableTargetsOf(words).flatMap(target => [
               query('tracked', git('ls-files', '--error-unmatch', '--', target), target),
               query('untracked', git('ls-files', '--others', '--exclude-standard', '--', target), target),
+              query('ignored', git('ls-files', '--others', '--ignored', '--exclude-standard', '--', target), target),
             ]),
           ]
     case 'git-clean':
@@ -260,7 +263,9 @@ export const factsOf = (plan: readonly ExhibitQuery[], results: readonly Exhibit
         }
         break
       case 'ignored':
-        if (result.exitCode === 0) {
+        if (result.exitCode === 0 && one.target !== undefined) {
+          facts.ignoredIn = { ...facts.ignoredIn, [one.target]: countOf(out) }
+        } else if (result.exitCode === 0) {
           facts.ignored = countOf(out)
         }
         break
@@ -269,12 +274,16 @@ export const factsOf = (plan: readonly ExhibitQuery[], results: readonly Exhibit
   // the targets are read together or not at all: one unread leaves every
   // target unknown, never a partial picture
   const targets = plan.filter(one => one.target !== undefined)
-  const isEveryTargetRead = targets.every(one =>
-    one.kind === 'tracked' ? facts.tracked?.[one.target ?? ''] !== undefined : facts.untracked?.[one.target ?? ''] !== undefined,
-  )
+  const readFor: Partial<Record<ExhibitKind, Record<string, unknown> | undefined>> = {
+    tracked: facts.tracked,
+    untracked: facts.untracked,
+    ignored: facts.ignoredIn,
+  }
+  const isEveryTargetRead = targets.every(one => readFor[one.kind]?.[one.target ?? ''] !== undefined)
   if (!isEveryTargetRead) {
     delete facts.tracked
     delete facts.untracked
+    delete facts.ignoredIn
   }
   if (!isPushPlain) {
     delete facts.behind
@@ -330,6 +339,11 @@ export const exhibitLinesOf = (facts: Facts): string[] => {
       said.push(count === 0 ? 'the repository holds no untracked files.' : `the repository holds ${plural(count, 'untracked file', 'untracked files')}.`)
     } else if (count > 0) {
       said.push(`${sanitizedOf(target, NAME_CELLS)} holds ${plural(count, 'untracked file', 'untracked files')}.`)
+    }
+  }
+  for (const [target, count] of Object.entries(facts.ignoredIn ?? {})) {
+    if (count > 0) {
+      said.push(`${sanitizedOf(target, NAME_CELLS)} holds ${plural(count, 'ignored file', 'ignored files')}, which history does not keep.`)
     }
   }
   if (facts.ignored !== undefined) {
