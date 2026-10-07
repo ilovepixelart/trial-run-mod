@@ -179,7 +179,7 @@ describe('targets the shell reads differently', () => {
     await $.tool.check(check('rm -rf -- -x'))
     expect(seen.prompts.judge).toContain('<exhibit>Exhibit A: -x is tracked by git, so history keeps it.</exhibit>')
     await $.tool.check(check('git push --force origin main'))
-    expect(seen.prompts.judge).toContain('<exhibit>Exhibit A: the upstream branch has no commits this branch lacks.</exhibit>')
+    expect(seen.prompts.judge).toContain('<exhibit>Exhibit A: the upstream branch has no commits this branch lacks, as of the last fetch.</exhibit>')
   })
 })
 
@@ -224,18 +224,30 @@ describe('the world changes between two identical commands', () => {
     })
   }
 
-  for (const command of ['rm -rf build', 'git push --force origin main']) {
-    test(`nothing changed: the second ${command} follows precedent`, async ($, on) => {
-      mock.clock(on)
-      memoryStore(on)
-      const seen = seatCourt(on, { ...verdictBench(ACQUITTED), git: gitIn(() => start), root: () => '/work/app' })
+  test('nothing changed: the second rm -rf build follows precedent', async ($, on) => {
+    mock.clock(on)
+    memoryStore(on)
+    const seen = seatCourt(on, { ...verdictBench(ACQUITTED), git: gitIn(() => start), root: () => '/work/app' })
 
-      await $.tool.check(check(command))
-      await $.tool.check(check(command))
+    await $.tool.check(check('rm -rf build'))
+    await $.tool.check(check('rm -rf build'))
 
-      expect(seen.calls).toHaveLength(3)
-    })
-  }
+    expect(seen.calls).toHaveLength(3)
+  })
+
+  // the upstream count is as of the last fetch, so it can never vouch for a push
+  test('nothing changed: the second git push --force origin main still goes to trial', async ($, on) => {
+    mock.clock(on)
+    const saved = memoryStore(on)
+    const seen = seatCourt(on, { ...verdictBench(ACQUITTED), git: gitIn(() => start), root: () => '/work/app' })
+
+    await $.tool.check(check('git push --force origin main'))
+    const again = await $.tool.check(check('git push --force origin main'))
+
+    expect(seen.calls).toHaveLength(6)
+    expect(again.reason).not.toContain('precedent')
+    expect((saved.get('cases') as { precedent?: number }[]).map(one => one.precedent)).toEqual([undefined, undefined])
+  })
 
   test('a detached HEAD never follows precedent', async ($, on) => {
     mock.clock(on)

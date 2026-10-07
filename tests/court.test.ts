@@ -1023,7 +1023,7 @@ const behindRepo = (argv: readonly string[]) => {
   return gitSaid('ada@example.com\nlin@example.com\nada@example.com\n')
 }
 
-const BEHIND = 'Exhibit A: the upstream branch has 3 commits this branch does not, by 2 authors.'
+const BEHIND = 'Exhibit A: the upstream branch has 3 commits this branch does not, by 2 authors, as of the last fetch.'
 
 describe('exhibits', () => {
   test('exhibits are entered into evidence for every role and listed in the pane', async ($, on) => {

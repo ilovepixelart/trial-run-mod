@@ -164,10 +164,10 @@ describe('exhibits', () => {
 
   test('exhibit lines are lettered, name only counts and states, never author emails', () => {
     expect(exhibitLinesOf({ isRepo: true, behind: 3, upstreamAuthors: 2 })).toEqual([
-      'Exhibit A: the upstream branch has 3 commits this branch does not, by 2 authors.',
+      'Exhibit A: the upstream branch has 3 commits this branch does not, by 2 authors, as of the last fetch.',
     ])
     expect(exhibitLinesOf({ isRepo: true, behind: 0, upstreamAuthors: 1 })).toEqual([
-      'Exhibit A: the upstream branch has no commits this branch lacks.',
+      'Exhibit A: the upstream branch has no commits this branch lacks, as of the last fetch.',
     ])
     // git cannot read uncommitted changes without running the repository's own
     // filters, so a reset's exhibit says it did not look, never reassures alone
@@ -212,7 +212,8 @@ describe('exhibits', () => {
   test('material facts exist only when every one the plan asks for was read', () => {
     const push = planOf('git push --force origin main')
     const here = { top: '/work/app', prefix: '', branch: 'main' }
-    expect(materialOf(push, { isRepo: true, ...here, behind: 0, upstreamAuthors: 1 })).toEqual({ ...here, behind: 0 })
+    // a force push never sets precedent, even with every fact read
+    expect(materialOf(push, { isRepo: true, ...here, behind: 0, upstreamAuthors: 1 })).toBeUndefined()
     expect(materialOf(push, { isRepo: true, behind: 0 })).toBeUndefined()
     expect(materialOf(push, { isRepo: true, top: '/work/app', prefix: '', behind: 0 })).toBeUndefined()
     expect(materialOf(push, { isRepo: true, ...here, upstreamAuthors: 1 })).toBeUndefined()

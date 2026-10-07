@@ -478,9 +478,10 @@ export const exhibitLinesOf = (facts: Facts): string[] => {
   if (facts.behind !== undefined) {
     said.push(
       facts.behind === 0
-        ? 'the upstream branch has no commits this branch lacks.'
+        ? 'the upstream branch has no commits this branch lacks, as of the last fetch.'
         : `the upstream branch has ${plural(facts.behind, 'commit', 'commits')} this branch does not` +
-            (facts.upstreamAuthors === undefined ? '.' : `, by ${plural(facts.upstreamAuthors, 'author', 'authors')}.`),
+            (facts.upstreamAuthors === undefined ? '' : `, by ${plural(facts.upstreamAuthors, 'author', 'authors')}`) +
+            ', as of the last fetch.',
     )
   }
   if (facts.ahead !== undefined) {
@@ -522,16 +523,18 @@ export const exhibitLinesOf = (facts: Facts): string[] => {
 /**
  * The facts precedent compares, only when every one the plan asks for was
  * read in a repository: undefined when any is unknown (no git, not a
- * repository, no upstream, a timeout, unreadable output) or the charge has
- * none, so a failed exhibit can never stand in for a known one.
+ * repository, a timeout, unreadable output) or the charge has none (all but
+ * `rm` with paths), so a failed exhibit can never stand in for a known one.
  *
  * @param plan the commands, as `planOf` gave them
  * @param facts what they returned, as `factsOf` read it
  */
 export const materialOf = (plan: readonly ExhibitQuery[], facts: Facts): MaterialFacts | undefined => {
-  const asked = plan.filter(one => one.kind === 'behind' || one.kind === 'tracked')
-  const isRead = (one: ExhibitQuery) =>
-    one.kind === 'behind' ? facts.behind !== undefined : one.target !== undefined && Object.hasOwn(facts.tracked ?? {}, one.target) && facts.tracked?.[one.target] !== undefined
+  // the upstream count is the tracking ref as of the last fetch, not the
+  // remote a push reaches, so it never vouches for a repeat: a force push
+  // sets no precedent and every one goes to trial
+  const asked = plan.filter(one => one.kind === 'tracked')
+  const isRead = (one: ExhibitQuery) => one.target !== undefined && Object.hasOwn(facts.tracked ?? {}, one.target) && facts.tracked?.[one.target] !== undefined
   const isPlaced = facts.top !== undefined && facts.prefix !== undefined && facts.branch !== undefined
   return asked.length > 0 && facts.isRepo === true && isPlaced && asked.every(isRead) && isEveryTargetClean(facts)
     ? materialFactsOf(facts)
