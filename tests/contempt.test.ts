@@ -33,6 +33,17 @@ describe('contempt', () => {
     }
   })
 
+  test('quoting that leaves the same words is the same command', () => {
+    const cases: readonly (readonly [string, string])[] = [
+      ['rm -rf "a b"', "rm -rf 'a b'"],
+      ['rm -rf "a b"', 'rm -rf a\\ b'],
+      ['rm -rf src', 'rm -rf "src"'],
+    ]
+    for (const [a, b] of cases) {
+      expect(contemptKeyOf(b), `${a} | ${b}`).toBe(contemptKeyOf(a))
+    }
+  })
+
   test('a different target, subcommand or long flag is a different command', () => {
     const cases: readonly (readonly [string, string])[] = [
       ['rm -rf src', 'rm -rf dist'],
@@ -43,6 +54,8 @@ describe('contempt', () => {
       ['kubectl delete pod web', 'kubectl delete pod api'],
       ['/bin/rm -rf src', '/bin/rm -rf dist'],
       ['rm -rf src', 'rmdir src'],
+      ['rm -rf "a b"', 'rm -rf a b'],
+      ['rm -rf a\\ b', 'rm -rf a b'],
     ]
     for (const [a, b] of cases) {
       expect(contemptKeyOf(b), `${a} | ${b}`).not.toBe(contemptKeyOf(a))

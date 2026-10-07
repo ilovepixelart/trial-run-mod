@@ -154,7 +154,7 @@ describe('docket', () => {
 
     test('only a plainly spelled command name sets or follows precedent', () => {
       expect(precedentOf([heard(1, 'acquitted')], sought)?.number).toBe(1)
-      for (const command of ['./rm -rf dist', '/bin/rm -rf dist']) {
+      for (const command of ['./rm -rf dist', '/bin/rm -rf dist', 'RM -rf dist']) {
         expect(precedentOf([heard(1, 'acquitted')], { ...sought, command }), command).toBeUndefined()
         expect(precedentOf([heard(1, 'acquitted', { command })], { ...sought, command }), command).toBeUndefined()
       }

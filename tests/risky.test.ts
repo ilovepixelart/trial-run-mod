@@ -78,6 +78,8 @@ describe('risky', () => {
       ['cd app && sudo rm -rf /tmp/cache', 'sudo rm -rf /tmp/cache'],
       ["bash -c 'cd app; git reset --hard'", 'git reset --hard'],
       ['git push --force origin main', 'git push --force origin main'],
+      ['rm -rf src 2>&1', 'rm -rf src 2>&1'],
+      ['ls >&2 && rm -rf src', 'rm -rf src'],
     ]
     for (const [command, charged] of cases) {
       expect(chargeOf(command)?.command, command).toBe(charged)
@@ -145,6 +147,135 @@ describe('risky', () => {
       'ls | xargs -n 1 rm -rf',
     ]) {
       expect(chargeOf(command)?.id, command).toBeDefined()
+    }
+  })
+
+  test('a command name the shell resolves at run time is charged as any charged program it may be', () => {
+    const cases: readonly (readonly [string, string])[] = [
+      ["$'rm' -rf src", 'recursive-delete'],
+      ['$"rm" -rf src', 'recursive-delete'],
+      ["$'\\x72m' -rf src", 'recursive-delete'],
+      ["$'\\162m' -rf src", 'recursive-delete'],
+      ['r${x}m -rf src', 'recursive-delete'],
+      ['$RM -rf src', 'recursive-delete'],
+      ['"$(echo rm)" -rf src', 'recursive-delete'],
+      ['`echo rm` -rf src', 'recursive-delete'],
+      ['$(echo rm) -rf src', 'recursive-delete'],
+      ['/bin/r? -rf src', 'recursive-delete'],
+      ['/bin/r[m] -rf src', 'recursive-delete'],
+      ['/bin/r{m,x} -rf src', 'recursive-delete'],
+      ['$GIT push --force', 'force-push'],
+      ['"$RM" -rf src', 'recursive-delete'],
+      ['"${RM}" -rf src', 'recursive-delete'],
+      ['r"$x"m -rf src', 'recursive-delete'],
+      ['"${GIT}" push --force origin main', 'force-push'],
+    ]
+    for (const [command, id] of cases) {
+      expect(chargeOf(command)?.id, command).toBe(id)
+    }
+  })
+
+  test('a line continuation or a name in other case does not hide a charge', () => {
+    for (const command of ['r\\\nm -rf src', 'RM -rf src', 'R\\M -rf src', 'GIT push --force']) {
+      expect(chargeOf(command), JSON.stringify(command)).toBeDefined()
+    }
+  })
+
+  test('redirections, groups, keywords and substitutions do not hide a charge', () => {
+    for (const command of [
+      'rm>x -rf src',
+      'rm<x -rf src',
+      '2>/dev/null rm -rf src',
+      '>x rm -rf src',
+      '&>/dev/null rm -rf src',
+      '(rm -rf src)',
+      '{ rm -rf src; }',
+      'if true; then rm -rf src; fi',
+      'while true; do rm -rf src; done',
+      '! rm -rf src',
+      'ls & rm -rf src',
+      'echo $(rm -rf src)',
+      'echo `rm -rf src`',
+      'echo "$(rm -rf src)"',
+      'x=$(rm -rf src)',
+    ]) {
+      expect(chargeOf(command)?.id, command).toBe('recursive-delete')
+    }
+  })
+
+  test('a nested script with a separator inside its quotes is read whole, as the inner shell reads it', () => {
+    const cases: readonly (readonly [string, string])[] = [
+      ['bash -c "echo hi; \\"rm\\" -rf src"', 'recursive-delete'],
+      ['cd x && bash -c "a; r\\"\\"m -rf src"', 'recursive-delete'],
+      ['sh -c "ls; \\"\\$RM\\" -rf src"', 'recursive-delete'],
+      ['bash -c "echo hi; \\"git\\" push --force"', 'force-push'],
+      ['echo \\" && bash -c "a; \\"rm\\" -rf src"', 'recursive-delete'],
+    ]
+    for (const [command, id] of cases) {
+      expect(chargeOf(command)?.id, command).toBe(id)
+    }
+  })
+
+  test('a separator inside quotes still splits, and the quoted half goes to trial', () => {
+    for (const command of ["echo 'a; rm -rf' src", "echo 'a; rm -rf src'", 'echo "a; rm -rf" src']) {
+      expect(chargeOf(command)?.id, command).toBe('recursive-delete')
+    }
+  })
+
+  test('quoting inside an argument is read as the shell reads it', () => {
+    const cases: readonly (readonly [string, string])[] = [
+      ['rm -r""f src', 'recursive-delete'],
+      ['rm -\\rf src', 'recursive-delete'],
+      ["rm '-r' src", 'recursive-delete'],
+      ['git push -\\f', 'force-push'],
+      ['git "pu"sh --force', 'force-push'],
+      ["git reset '--hard'", 'hard-reset'],
+    ]
+    for (const [command, id] of cases) {
+      expect(chargeOf(command)?.id, command).toBe(id)
+    }
+  })
+
+  test('a wrapper option value, attached or apart, short or long, is not read as the command', () => {
+    for (const command of [
+      'sudo -uroot rm -rf src',
+      'sudo --user root rm -rf src',
+      'env --unset HOME rm -rf src',
+      'nice -n10 rm -rf src',
+      'nice --adjustment 5 rm -rf src',
+      'xargs -a list rm -rf',
+    ]) {
+      expect(chargeOf(command)?.id, command).toBe('recursive-delete')
+    }
+  })
+
+  test('the command line env splits from one string is charged', () => {
+    for (const command of ["env -S 'rm -rf src'", 'env -S"rm -rf src"', "env --split-string='rm -rf src'", "env -i -S 'git push --force'"]) {
+      expect(chargeOf(command), command).toBeDefined()
+    }
+  })
+
+  test('quotes the shell keeps literal name another program, and a quoted or unrun mention is not charged', () => {
+    for (const command of [
+      `'r"m' -rf src`,
+      `"r'm" -rf src`,
+      '"rm -rf src"',
+      "'rm -rf' src",
+      "echo '$(rm -rf src)'",
+      '\\$RM -rf src',
+      "$'ls' -R src",
+      "$'\\x6cs' -R src",
+      "$'\\154s' -R src",
+      '"\\rm" -rf src',
+      "echo 'rm -rf src' > notes.txt",
+      '[ -r file ]',
+      '(ls -R)',
+      'cd "$dir" && ls',
+      '"$EDITOR" notes.txt',
+      'echo $HOME',
+      'test -r x',
+    ]) {
+      expect(chargeOf(command), command).toBeUndefined()
     }
   })
 
@@ -222,6 +353,12 @@ describe('risky', () => {
       '/usr/bin/env rm -rf node_modules',
       '/usr/bin/xargs rm -rf',
       '/bin/bash -c rm',
+      '"$RM" -rf src',
+      '"${RM}" -rf src',
+      '"$(echo rm)" -rf src',
+      '"${GIT}" push --force origin main',
+      'r"$x"m -rf src',
+      '\\$RM -rf src',
       'env rm -rf node_modules',
       'xargs rm -rf',
       'FOO=1 rm -rf node_modules',
