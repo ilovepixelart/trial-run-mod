@@ -287,6 +287,26 @@ describe('risky', () => {
     }
   })
 
+  test('a git alias set on the command line is charged as what it runs', () => {
+    const cases: readonly (readonly [string, string])[] = [
+      ["git -c alias.x='!rm -rf src' x", 'recursive-delete'],
+      ['git -c alias.x="!rm -rf" x src', 'recursive-delete'],
+      ["git -c alias.y='reset --hard' y", 'hard-reset'],
+      ["git -c alias.p='push --force' p origin main", 'force-push'],
+      ["git -C app -c alias.y='clean -fdx' y", 'git-clean'],
+      ["git -c Alias.Nuke='reset --hard' nuke", 'hard-reset'],
+    ]
+    for (const [command, id] of cases) {
+      expect(chargeOf(command)?.id, command).toBe(id)
+    }
+  })
+
+  test('a git alias that runs something harmless is not charged', () => {
+    for (const command of ['git -c alias.st=status st', "git -c alias.x='!ls -R' x", "git -c alias.y='reset --hard' status", 'git -c core.x=y status']) {
+      expect(chargeOf(command), command).toBeUndefined()
+    }
+  })
+
   test('a nested script with a separator inside its quotes is read whole, as the inner shell reads it', () => {
     const cases: readonly (readonly [string, string])[] = [
       ['bash -c "echo hi; \\"rm\\" -rf src"', 'recursive-delete'],
@@ -498,6 +518,7 @@ describe('risky', () => {
       'coproc rm -rf src',
       'find . -exec rm -rf src +',
       'find . -okdir rm -rf src +',
+      'git -c alias.p=push p --force',
       '/bin/bash -c rm',
       '"$RM" -rf src',
       '"${RM}" -rf src',

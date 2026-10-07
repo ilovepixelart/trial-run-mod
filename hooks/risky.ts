@@ -632,9 +632,38 @@ const runnerScriptOf = (words: readonly string[]): string | undefined => {
   return words[0] === 'sg' ? words.slice(1).filter(word => !word.startsWith('-'))[1] : undefined
 }
 
+/**
+ * git's options that take the next word as their value.
+ */
+const GIT_VALUES = new Set(['-c', '-C', '--git-dir', '--work-tree', '--namespace', '--config-env', '--super-prefix'])
+
+/**
+ * What a git alias set on the command line (`git -c alias.x=...`) runs when
+ * the subcommand names it: a `!` alias is a shell script given the words
+ * after it, any other is git with its words in place of the subcommand.
+ */
+const gitAliasScriptOf = (words: readonly string[]): string | undefined => {
+  const aliases = new Map<string, string>()
+  let at = 1
+  while ((words[at] ?? '').startsWith('-')) {
+    const alias = words[at] === '-c' ? /^alias\.([^=]+)=([\s\S]*)$/i.exec(words[at + 1] ?? '') : null
+    if (alias !== null) aliases.set((alias[1] ?? '').toLowerCase(), alias[2] ?? '')
+    at += GIT_VALUES.has(words[at] ?? '') ? 2 : 1
+  }
+  const body = aliases.get((words[at] ?? '').toLowerCase())
+  const args = words.slice(at + 1)
+  if (body === undefined) {
+    return undefined
+  }
+  return body.startsWith('!') ? [body.slice(1), ...args].join(' ') : ['git', body, ...args].join(' ')
+}
+
 const innerScriptOf = (words: readonly string[]): string | undefined => {
   if (words[0] === 'eval') {
     return words.slice(1).join(' ')
+  }
+  if (words[0] === 'git') {
+    return gitAliasScriptOf(words)
   }
   if (SHELLS.has(words[0] ?? '')) {
     return shellScriptOf(words)
