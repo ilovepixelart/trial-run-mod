@@ -102,6 +102,25 @@ export const RULES: readonly Rule[] = [
 ]
 
 /**
+ * The charge for a script a shell or SQL client reads that the line does
+ * not spell: a file, a download, an expansion (`curl ... | sh`, `bash <
+ * x.sh`, `psql -f drop.sql`). What it would run is unknown, so it is tried.
+ */
+const UNREAD: Omit<Charge, 'command'> = { id: 'unread-script', label: 'unread script' }
+
+/**
+ * The options that name a file of SQL for a client to run.
+ */
+const SQL_FILE_OPTIONS = new Map<string, readonly string[]>([
+  ['psql', ['-f', '--file']],
+  ['cockroach', ['-f', '--file']],
+  ['duckdb', ['-f', '-init']],
+  ['sqlite3', ['-init']],
+  ['sqlcmd', ['-i', '--input-file']],
+  ['clickhouse-client', ['--queries-file']],
+])
+
+/**
  * Programs that run the command in the words after their own options and
  * operands; `watch` and `parallel` hand those words to a shell as a script.
  */
@@ -297,10 +316,19 @@ const isPatternAt = (line: string, at: number) =>
  * A redirection operator at `at` (`>`, `2>`, `&>`, `>>`, `<<<`, `>&2`, ...):
  * its length, and whether the next word is its target.
  */
-const redirectionAt = (line: string, at: number): { length: number; target: boolean } | undefined => {
-  const match = /^&?(?:<<<|<<-?|<>|>>|>\||[<>])(&(?:\d+|-))?/.exec(line.slice(at))
-  return match === null ? undefined : { length: match[0].length, target: match[1] === undefined }
+const redirectionAt = (line: string, at: number): { length: number; target: boolean; input?: Input['kind'] } | undefined => {
+  const match = /^&?(<<<|<<-?|<>|>>|>\||[<>])(&(?:\d+|-))?/.exec(line.slice(at))
+  const input = match?.[2] === undefined ? INPUTS[match?.[1] ?? ''] : undefined
+  return match === null ? undefined : { length: match[0].length, target: match[2] === undefined, ...(input === undefined ? {} : { input }) }
 }
+
+/**
+ * What a command reads on its input from a redirection: a here-string's
+ * word, the here-document after the line, or a file.
+ */
+type Input = { kind: 'string'; word: Word } | { kind: 'document' } | { kind: 'file' }
+
+const INPUTS: Readonly<Record<string, Input['kind']>> = { '<<<': 'string', '<<': 'document', '<<-': 'document', '<': 'file' }
 
 /**
  * The quoted part or expansion at `at`, read into the word: where it ends,
@@ -331,21 +359,23 @@ const quotedAt = (line: string, at: number, scripts: string[]): (Word & { end: n
 
 /**
  * The words of one segment as the shell reads them, with redirections and
- * their targets left out, the commands its substitutions run, and where a
- * `(` or `)` opens or ends a group or a case pattern (`(x)`, `x)`, `f()`),
- * as the count of words before it: the words after start a command of
- * their own. A quote
- * left dangling by a separator split inside quotes (`bash -c 'cd app` and
- * `git reset --hard'`) is dropped, so the halves still match a charge.
+ * their targets left out, the commands its substitutions run, where a `(`
+ * or `)` opens or ends a group or a case pattern (`(x)`, `x)`, `f()`), as
+ * the count of words before it (the words after start a command of their
+ * own), and what its input is redirected from. A quote left dangling by a
+ * separator split inside quotes (`bash -c 'cd app` and `git reset --hard'`)
+ * is dropped, so the halves still match a charge.
  */
-const lexOf = (line: string): { words: Word[]; scripts: string[]; breaks: number[] } => {
+const lexOf = (line: string): { words: Word[]; scripts: string[]; breaks: number[]; input?: Input } => {
   const words: Word[] = []
   const scripts: string[] = []
   const breaks: number[] = []
   let word: Word | undefined
   let target = false
+  let input: Input | undefined
   const end = () => {
     if (word !== undefined && !target) words.push(word)
+    if (word !== undefined && target && input?.kind === 'string' && input.word.text === '') input = { kind: 'string', word }
     if (word !== undefined) target = false
     word = undefined
   }
@@ -363,6 +393,7 @@ const lexOf = (line: string): { words: Word[]; scripts: string[]; breaks: number
       if (word !== undefined && /^\d+$/.test(word.text)) word = undefined
       end()
       target = redirection.target
+      if (redirection.input !== undefined) input = redirection.input === 'string' ? { kind: 'string', word: { text: '', exact: true } } : { kind: redirection.input }
       at += redirection.length
     } else if (/[\s()&]/.test(char)) {
       end()
@@ -377,13 +408,14 @@ const lexOf = (line: string): { words: Word[]; scripts: string[]; breaks: number
     }
   }
   end()
-  return { words, scripts, breaks }
+  return { words, scripts, breaks, ...(input === undefined ? {} : { input }) }
 }
 
 /**
  * The program a command word names, read case-blind as a case-blind file
  * system (the macOS default) runs it: a path read as its last part
- * (`/bin/rm`), and zsh's `=rm` as `rm`. Undefined when the shell only resolves it at run time.
+ * (`/bin/rm`), and zsh's `=rm` as `rm`. Undefined when the shell only
+ * resolves it at run time.
  */
 const programOf = (word: Word): string | undefined =>
   word.exact ? word.text.slice(word.text.lastIndexOf('/') + 1).replace(/^=(?=.)/, '').toLowerCase() : undefined
@@ -401,16 +433,66 @@ export const nameOf = (word: string) => {
 const SEPARATOR = /^(?:&&|\|\||\|&|[;|\n]|&(?!>))/
 
 /**
- * A command line split at the separators outside quotes, as the shell
- * splits it, so a nested script (`bash -c "a; \"rm\" -rf x"`) stays whole.
+ * A segment of a command line, with what feeds its input: the segment
+ * piped into it (`a | b`), and the here-document its `<<` reads.
  */
-const shellSplitOf = (line: string): string[] => {
-  const parts: string[] = []
+type Part = { text: string; from?: Part; document?: Document }
+
+/**
+ * A here-document: its body, whether the body is read as written (its
+ * delimiter quoted, or nothing in it to expand), and the whole of it as
+ * written, from the end of the line that opens it.
+ */
+type Document = { body: string; exact: boolean; spelling: string }
+
+const HEREDOC = /^<<(-?)[ \t]*(?:'([^']*)'|"([^"]*)"|(\\?[^\s;&|<>()]+))/
+
+/**
+ * The here-document a `<<` at `at` opens, with the newline it starts after
+ * and where it ends.
+ */
+const documentAt = (line: string, at: number): { newline: number; end: number; document: Document } | undefined => {
+  const match = line[at - 1] === '<' ? null : HEREDOC.exec(line.slice(at))
+  const newline = line.indexOf('\n', at)
+  if (match === null || match[0].startsWith('<<<') || newline === -1) {
+    return undefined
+  }
+  const delimiter = match[2] ?? match[3] ?? (match[4] ?? '').replace(/^\\/, '')
+  const lines = line.slice(newline + 1).split('\n')
+  const close = lines.findIndex(body => (match[1] === '-' ? body.replace(/^\t+/, '') : body) === delimiter)
+  const body = (close === -1 ? lines : lines.slice(0, close)).join('\n')
+  const end = close === -1 ? line.length : newline + 1 + lines.slice(0, close + 1).join('\n').length
+  const isQuoted = match[2] !== undefined || match[3] !== undefined || (match[4] ?? '').startsWith('\\')
+  return { newline, end, document: { body, exact: isQuoted || !/[$`\\]/.test(body), spelling: line.slice(newline, end) } }
+}
+
+/**
+ * A command line split at the separators outside quotes, as the shell
+ * splits it, so a nested script (`bash -c "a; \"rm\" -rf x"`) stays whole,
+ * each segment with the segment piped into it and the here-document it
+ * reads; a here-document's body is input, not commands.
+ */
+const shellSplitOf = (line: string): Part[] => {
+  const parts: Part[] = []
   let start = 0
+  let from: Part | undefined
+  let document: ReturnType<typeof documentAt>
+  let isOwn = false
+  const push = (end: number, separator: string) => {
+    const part = { text: line.slice(start, end), ...(from === undefined ? {} : { from }), ...(isOwn && document ? { document: document.document } : {}) }
+    parts.push(part)
+    from = separator === '|' || separator === '|&' ? part : undefined
+    isOwn = false
+  }
   for (let at = 0; at < line.length; ) {
     const char = line[at] ?? ''
     const separator = SEPARATOR.exec(line.slice(at))?.[0]
-    if (char === '\\') {
+    const opened = char === '<' && document === undefined ? documentAt(line, at) : undefined
+    if (opened !== undefined) {
+      document = opened
+      isOwn = true
+      at += 2
+    } else if (char === '\\') {
       at += 2
     } else if (char === "'" || char === '"') {
       const close = closingQuoteOf(line, at, char === '"')
@@ -418,12 +500,14 @@ const shellSplitOf = (line: string): string[] => {
     } else if (separator === undefined || line[at - 1] === '<' || line[at - 1] === '>') {
       at += 1
     } else {
-      parts.push(line.slice(start, at))
-      at += separator.length
+      push(at, separator)
+      at = at === document?.newline ? document.end : at + separator.length
+      document = at === document?.end ? undefined : document
       start = at
     }
   }
-  return [...parts, line.slice(start)]
+  push(line.length, '')
+  return parts
 }
 
 /**
@@ -432,9 +516,9 @@ const shellSplitOf = (line: string): string[] => {
  * it, then again at every separator, inside quotes too. The second reading
  * can only put more commands on trial, never fewer.
  */
-const segmentsOf = (command: string): string[] => {
+const segmentsOf = (command: string): Part[] => {
   const line = command.replace(/\\\n/g, '')
-  return [...shellSplitOf(line), ...line.split(/&&|\|\||(?<![<>|])&(?!>)|[;|\n]/)]
+  return [...shellSplitOf(line), ...line.split(/&&|\|\||(?<![<>|])&(?!>)|[;|\n]/).map(text => ({ text }))]
 }
 
 type Simple = {
@@ -449,6 +533,8 @@ type Simple = {
    * -exec`), to stand for it in place of `words` once charged.
    */
   whole?: string[]
+  /** Whether this is a script the court cannot read, charged as such. */
+  unread?: boolean
 }
 
 /**
@@ -538,29 +624,96 @@ const commandStartOf = (words: readonly Word[]): { at: number; script?: string }
  * it is matched on; for `bash -c '...'`, `eval '...'` and `env -S '...'`, the
  * commands inside instead; and the commands its substitutions run.
  */
-const commandsOf = (segment: string, depth = 0): Simple[] => {
+const commandsOf = (part: Part, depth = 0): Simple[] => {
   const nested = (script: string) =>
-    depth < 3 ? segmentsOf(script).flatMap(part => commandsOf(part, depth + 1)) : []
-  const { words, scripts, breaks } = lexOf(segment.trim())
+    depth < 3 ? segmentsOf(script).flatMap(inner => commandsOf(inner, depth + 1)) : []
+  const { words, scripts, breaks, input } = lexOf(part.text.trim())
   const ends = [...breaks, words.length]
   const groups = [0, ...breaks].map((from, index) => words.slice(from, ends[index]))
-  return [...groups.flatMap(group => simpleOf(group, segment, nested)), ...scripts.flatMap(nested)]
+  return [...groups.flatMap(group => simpleOf(group, { part, input, nested })), ...scripts.flatMap(nested)]
 }
 
 /**
- * The simple command of one group of words, or the commands of the script
- * it runs.
+ * Where a group of words stands: its segment, what its input is
+ * redirected from, and how to read a script it runs.
  */
-const simpleOf = (words: readonly Word[], segment: string, nested: (script: string) => Simple[]): Simple[] => {
+type Context = { part: Part; input: Input | undefined; nested: (script: string) => Simple[] }
+
+/**
+ * The simple command of one group of words, or the commands of the script
+ * it runs, with those of a script it reads on its input.
+ */
+const simpleOf = (words: readonly Word[], context: Context): Simple[] => {
   const start = commandStartOf(words)
   const [head, ...args] = words.slice(start.at)
   const program = head === undefined ? undefined : programOf(head)
   const rest = head === undefined ? [] : [program ?? head.text, ...args.map(word => word.text)]
   const inner = start.script ?? innerScriptOf(rest)
   const open = head !== undefined && program === undefined
-  const own = inner === undefined ? [{ words: rest, open, text: spellingOf(segment) }] : nested(inner)
+  const own = inner === undefined ? [{ words: rest, open, text: spellingOf(context.part.text) }] : context.nested(inner)
+  const fed = inner === undefined ? fedOf(rest, context) : []
   const perFile = program === 'find' ? execsOf(args) : []
-  return [...own, ...perFile.flatMap(command => simpleOf(command, segment, nested).map(simple => ({ ...simple, whole: rest })))]
+  return [...own, ...fed, ...perFile.flatMap(command => simpleOf(command, context).map(simple => ({ ...simple, whole: rest })))]
+}
+
+/**
+ * The script a command reads on its input: from a here-string, its
+ * here-document, or the segment piped into it; `unread` for a file or
+ * anything else the line does not spell; undefined for no input.
+ */
+const inputOf = (part: Part, input: Input | undefined): { script: string; exact: boolean } | 'unread' | undefined => {
+  if (input?.kind === 'string') {
+    return { script: input.word.text, exact: input.word.exact }
+  }
+  if (input?.kind === 'document') {
+    // a segment split inside quotes knows no here-document; the shell's own split does
+    return part.document === undefined ? undefined : { script: part.document.body, exact: part.document.exact }
+  }
+  if (input?.kind === 'file') {
+    return 'unread'
+  }
+  return part.from === undefined ? undefined : outputOf(part.from)
+}
+
+/**
+ * What a segment writes to a pipe when the line spells it: the words of
+ * `echo` or `printf` (`\n` read as a new line), or the input `cat` passes
+ * on; `unread` for any other program.
+ */
+const outputOf = (part: Part): ReturnType<typeof inputOf> => {
+  const { words, input } = lexOf(part.text.trim())
+  const [head, ...args] = words.slice(commandStartOf(words).at)
+  const program = head === undefined ? undefined : programOf(head)
+  if (program === 'echo' || program === 'printf') {
+    const shown = program === 'echo' ? args.filter((word, at) => !args.slice(0, at + 1).every(one => /^-[neE]+$/.test(one.text))) : args
+    const script = shown.map(word => word.text).join(program === 'echo' ? ' ' : '\n').replaceAll('\\n', '\n')
+    return { script, exact: shown.every(word => word.exact) }
+  }
+  return program === 'cat' && args.every(word => word.text.startsWith('-')) ? inputOf(part, input) : 'unread'
+}
+
+/**
+ * The commands of a script a shell or SQL client reads on its input or
+ * from a file it names, and the script charged as unread when the line
+ * does not spell all of it. Read out with what feeds it.
+ */
+const fedOf = (rest: readonly string[], { part, input, nested }: Context): Simple[] => {
+  const program = rest[0] ?? ''
+  const isSql = SQL_CLIENTS.has(program)
+  const isShell = SHELLS.has(program) && shellReadingOf(rest) === 'input'
+  const read = isSql || isShell ? inputOf(part, input) : undefined
+  const fromText = input === undefined && part.from !== undefined ? `${spellingOf(part.from.text)} | ` : ''
+  const text = `${fromText}${spellingOf(part.text)}${input?.kind === 'document' ? (part.document?.spelling ?? '') : ''}`
+  const unread: Simple = { words: text.split(/\s+/), open: false, text, unread: true }
+  const options = SQL_FILE_OPTIONS.get(program) ?? []
+  if (rest.slice(1).some(word => options.some(option => word === option || word.startsWith(option.startsWith('--') ? `${option}=` : option)))) {
+    return [unread]
+  }
+  if (read === undefined || read === 'unread') {
+    return read === undefined ? [] : [unread]
+  }
+  const commands = isShell ? nested(read.script) : [{ words: [...rest, ...read.script.split(/\s+/)], open: false, text }]
+  return read.exact ? commands : [...commands, unread]
 }
 
 const EXEC_ACTIONS = new Set(['-exec', '-execdir', '-ok', '-okdir'])
@@ -600,23 +753,30 @@ const commandOptionOf = (words: readonly string[], at: number): string | undefin
 
 /**
  * The script a shell runs from its first operand: with `-c` in any of its
- * flags (`bash -lc`, `sh -ec`, `bash -c -x`), or `--command` (fish).
+ * flags (`bash -lc`, `sh -ec`, `bash -c -x`), or `--command` (fish);
+ * `input` when it reads its script on its input (no operand, or `-s`);
+ * undefined when it runs a script file.
  */
-const shellScriptOf = (words: readonly string[]): string | undefined => {
+const shellReadingOf = (words: readonly string[]): { script: string } | 'input' | undefined => {
   let isCommand = false
+  let isInput = false
   let at = 1
   while (at < words.length && /^[-+]./.test(words[at] ?? '') && words[at] !== '--') {
     const word = words[at] ?? ''
     const script = word.startsWith('--') ? commandOptionOf(words, at) : undefined
     if (script !== undefined) {
-      return script
+      return { script }
     }
     isCommand ||= /^-[A-Za-z]*c/.test(word)
+    isInput ||= /^-[A-Za-z]*s/.test(word)
     // -o / -O name an option in the next word; so do --rcfile and --init-file
     at += /^[-+][A-Za-z]*[oO]$|^--(rcfile|init-file)$/.test(word) ? 2 : 1
   }
   at += words[at] === '--' || words[at] === '-' ? 1 : 0
-  return isCommand ? (words[at] ?? '') : undefined
+  if (isCommand) {
+    return { script: words[at] ?? '' }
+  }
+  return isInput || at >= words.length ? 'input' : undefined
 }
 
 /**
@@ -667,7 +827,8 @@ const innerScriptOf = (words: readonly string[]): string | undefined => {
     return gitAliasScriptOf(words)
   }
   if (SHELLS.has(words[0] ?? '')) {
-    return shellScriptOf(words)
+    const reading = shellReadingOf(words)
+    return typeof reading === 'object' ? reading.script : undefined
   }
   return RUNNERS.has(words[0] ?? '') ? runnerScriptOf(words) : undefined
 }
@@ -695,7 +856,7 @@ const NOT_SIMPLE_HEADS = new Set([...WRAPPERS, ...SHELLS, ...RUNNERS, 'eval', 's
  */
 export const isSimpleCommand = (command: string): boolean => {
   const [head, ...rest] = command.trim().split(/\s+/)
-  const matched = trialOf(command)?.matched
+  const trial = trialOf(command)
   return (
     PLAIN_LINE.test(command) &&
     !TILDE.test(command) &&
@@ -704,7 +865,8 @@ export const isSimpleCommand = (command: string): boolean => {
     !head.includes('=') &&
     !NOT_SIMPLE_HEADS.has(nameOf(head)) &&
     // charged on its own words, never on a command it runs (`find -exec`)
-    (matched === undefined || matched.join(' ') === [nameOf(head), ...rest].join(' '))
+    // or a script it reads (`psql -f drop.sql`)
+    (trial === undefined || (trial.charge.id !== UNREAD.id && trial.matched.join(' ') === [nameOf(head), ...rest].join(' ')))
   )
 }
 
@@ -733,7 +895,10 @@ export const chargedOf = (command: string): { charge: Charge; words: readonly st
  * `find -exec`).
  */
 const trialOf = (command: string): { charge: Charge; words: readonly string[]; matched: readonly string[] } | undefined => {
-  for (const { words, open, text, whole } of segmentsOf(command).flatMap(segment => commandsOf(segment))) {
+  for (const { words, open, text, whole, unread } of segmentsOf(command).flatMap(segment => commandsOf(segment))) {
+    if (unread === true) {
+      return { charge: { ...UNREAD, command: text }, words, matched: words }
+    }
     const tried = open ? PROGRAMS.map(program => [program, ...words.slice(1)]) : [words]
     for (const one of tried) {
       const rule = RULES.find(candidate => candidate.test(one))
