@@ -22,6 +22,10 @@ export type CourtTrial = {
    */
   number: number
   priors: number
+  /**
+   * The facts the court read from the repository, as "Exhibit A: ..." lines.
+   */
+  exhibits: string[]
   speeches: CourtSpeech[]
   verdict: CourtVerdict | null
   /**

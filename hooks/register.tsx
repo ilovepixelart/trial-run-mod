@@ -4,6 +4,8 @@ import type { EngineInterface, Register, ResultOf } from 'claude-code'
 import type { CourtRole, CourtTrial, CourtVerdict } from '../types'
 import { contemptKeyOf } from './contempt'
 import { DOCKET_LAYOUT, casesOf, docketOf, fileCase, isReadableLayout, nextCaseNumber, priorsOf } from './docket'
+import { GIT_ENV, exhibitLinesOf, factsOf, planOf } from './exhibits'
+import type { ExhibitResult, Facts } from './exhibits'
 import type { CaseRecord } from './docket'
 import { gaugeOf } from './gauge'
 import { caseNumberOf, caseRowOf, docketLayoutOf, headerLinesOf, lineOf, rapSheetLayoutOf, wrapOf } from './layout'
@@ -31,6 +33,12 @@ const LAYOUT = 'layout'
  * `$.clock` wait counts against it, so the court rules before that.
  */
 const DEADLINE_MS = 9_000
+
+/**
+ * How long the court waits for its exhibits. They run at once, so this
+ * bounds each one and all of them together; one not back by then is left out.
+ */
+const EXHIBIT_MS = 500
 
 const GAVEL_SOUND = 'sounds/gavel.wav'
 
@@ -118,6 +126,30 @@ const testimonyFrom = async ($: EngineInterface) => {
   } catch {
     return testimonyOf([])
   }
+}
+
+/**
+ * The facts the repository gives on a charged command. Read-only git by
+ * argv from `planOf`'s allowlist; a git that fails, is refused or is still
+ * running at the bound gives no fact, never an error.
+ */
+const factsFrom = async ($: EngineInterface, command: string): Promise<Facts> => {
+  const plan = planOf(command)
+  const timer = new AbortController()
+  const bound = $.clock.sleep(EXHIBIT_MS, { signal: timer.signal }).then(
+    (): ExhibitResult => undefined,
+    (): ExhibitResult => undefined,
+  )
+  const results = await Promise.all(
+    plan.map(query =>
+      Promise.race<ExhibitResult>([
+        $.process.run(query.argv, { env: { ...GIT_ENV }, timeoutMs: EXHIBIT_MS }).catch(() => undefined),
+        bound,
+      ]),
+    ),
+  )
+  timer.abort()
+  return factsOf(plan, results)
 }
 
 const quietly = (work: Promise<unknown>) => {
@@ -287,6 +319,7 @@ export const register: Register = on => {
         charge: charge.label,
         number: nextCaseNumber(history),
         priors: priorsOf(history, charge.label),
+        exhibits: [],
         speeches: [{ role: 'judge' as const, text: reason }],
         verdict: { kind: 'contempt' as const, reason, decision: 'deny' as const },
         shown: 5,
@@ -315,6 +348,7 @@ export const register: Register = on => {
       charge: charge.label,
       number: nextCaseNumber(history),
       priors: priorsOf(history, charge.label),
+      exhibits: [],
       speeches: [],
       verdict: null,
       shown: 0,
@@ -380,9 +414,15 @@ export const register: Register = on => {
     const timer = new AbortController()
     const never = new Promise<Ruling>(() => undefined)
 
+    const exhibitsFrom = async () => {
+      const exhibits = exhibitLinesOf(await factsFrom($, command))
+      await update($, trialAtom, trial => (trial?.id === id ? { ...trial, exhibits } : trial))
+      return exhibits
+    }
+
     const ruling = await Promise.race<Ruling>([
-      testimonyFrom($)
-        .then(testimony => tryCase({ command, charge, ...testimony }, speak, onSpeech))
+      Promise.all([testimonyFrom($), exhibitsFrom()])
+        .then(([testimony, exhibits]) => tryCase({ command, charge, ...testimony, exhibits }, speak, onSpeech))
         .catch(() => ({ kind: 'hung', reason: 'the court fell into disorder' })),
       $.clock
         .sleep(DEADLINE_MS, { signal: timer.signal })
@@ -495,6 +535,9 @@ export const register: Register = on => {
           {headerLinesOf(trial.charge, trial.number, trial.priors, body).map(line => (
             <Text dimColor>{line}</Text>
           ))}
+          {trial.exhibits.map(line => (
+            <Text dimColor>{lineOf(line, body)}</Text>
+          ))}
           {heard.map(speech => (
             <Box>
               <Text bold color={ROLE_COLORS[speech.role]}>
@@ -571,6 +614,13 @@ export const register: Register = on => {
         {headerLinesOf(trial.charge, trial.number, trial.priors, body).map(line => (
           <Text dimColor>{line}</Text>
         ))}
+        {trial.exhibits.length === 0 ? null : (
+          <Box key="exhibits" flexDirection="column" marginTop={1}>
+            {trial.exhibits.flatMap(line => wrapOf(line, body)).map(line => (
+              <Text>{line}</Text>
+            ))}
+          </Box>
+        )}
         {heard.map(speech => (
           <Box flexDirection="column" marginTop={1}>
             <Text bold color={ROLE_COLORS[speech.role]}>

@@ -1,4 +1,4 @@
-import type { ModelCompleteResult, On, ResultOf, SessionMessage } from 'claude-code'
+import type { ModelCompleteResult, On, ProcessRunInit, ProcessRunResult, ResultOf, SessionMessage } from 'claude-code'
 
 /**
  * Who speaks in a trial, as the plugin's system prompts name them.
@@ -21,6 +21,11 @@ export type Bench = {
    * a pane the plugin opens on its own undrawn. Placed when absent.
    */
   placed?: boolean
+  /**
+   * How git answers the court's exhibits; when absent, the session's own
+   * answer stands.
+   */
+  git?: (argv: readonly string[]) => ProcessRunResult | Promise<ProcessRunResult>
 }
 
 /**
@@ -29,7 +34,9 @@ export type Bench = {
 export type Record = {
   calls: Role[]
   prompts: Partial<{ [role in Role]: string }>
+  systems: Partial<{ [role in Role]: string }>
   opened: string[]
+  runs: { argv: readonly string[]; init?: ProcessRunInit }[]
 }
 
 const ZERO = {
@@ -71,11 +78,12 @@ const roleOf = (system: string): Role =>
  * @returns what it saw
  */
 export const seatCourt = (on: On, bench: Bench): Record => {
-  const record: Record = { calls: [], prompts: {}, opened: [] }
+  const record: Record = { calls: [], prompts: {}, systems: {}, opened: [], runs: [] }
   on('model.complete', async ($, e) => {
     const role = roleOf(e.system ?? '')
     record.calls.push(role)
     record.prompts[role] = e.prompt
+    record.systems[role] = e.system
     return { value: await bench.reply(role) }
   })
   on('tool.check', () => bench.beneath ?? { decision: 'allow' })
@@ -86,6 +94,13 @@ export const seatCourt = (on: On, bench: Bench): Record => {
       value: bench.placed === false ? { isPlaced: false as const, reason: 'below 144 columns' } : { isPlaced: true as const },
     }
   })
+  const git = bench.git
+  if (git !== undefined) {
+    on('process.run', async ($, e) => {
+      record.runs.push({ argv: e.argv, init: e.init })
+      return { value: await git(e.argv) }
+    })
+  }
   on('audio.play', () => ({ value: undefined }))
   on('audio.speak', () => ({ value: { via: 'system' } }))
   return record
@@ -98,4 +113,15 @@ export const verdictBench = (judge: string, beneath?: ResultOf['tool.check']): B
   reply: role =>
     said(role === 'judge' ? judge : role === 'prosecutor' ? 'It destroys work.' : 'It is a build folder.'),
   beneath,
+})
+
+/**
+ * What git wrote, as `$.process.run` resolves it.
+ */
+export const gitSaid = (stdout: string, exitCode = 0): ProcessRunResult => ({
+  exitCode,
+  stdout,
+  stderr: '',
+  isStdoutTruncated: false,
+  isStderrTruncated: false,
 })

@@ -44,6 +44,19 @@ Only Bash calls whose command matches a charge in [`hooks/risky.ts`](hooks/risky
 
 `git rm -r` is not charged: what it removes is tracked, so git history has it back. `git clean -f` is: the untracked files it deletes are in no history at all.
 
+## Exhibits
+
+Before counsel speaks, the court reads a few facts from git in the directory the session runs in and enters them into evidence: quoted to all three roles, and listed in the pane as `Exhibit A: the upstream branch has 3 commits this branch does not, by 2 authors.` For the charges below it first asks `git rev-parse --is-inside-work-tree`, then:
+
+| Charge | What git is asked |
+| --- | --- |
+| force push | `git rev-list --count HEAD..@{upstream}`: the upstream commits this branch lacks; `git log -20 --no-show-signature --format=%ae @{upstream}`: how many distinct authors wrote the last 20 (the addresses are counted on this machine, never shown or sent) |
+| hard reset | `git rev-list --count @{upstream}..HEAD`: the local commits not on the upstream branch |
+| recursive delete with `rm` | for each of the first 3 paths: `git ls-files --error-unmatch -- <path>` (tracked or not) and `git ls-files --others --exclude-standard -- <path>` (how many untracked files under it) |
+| git clean | `git ls-files --others --exclude-standard`, plus `--ignored` when `-x` is given |
+
+A `find -delete` is only checked for being in a repository; the SQL, `kubectl` and `terraform` charges run no git at all. The commands are argument vectors from one table in [`hooks/exhibits.ts`](hooks/exhibits.ts), never a shell string, with every path after `--`. Each runs as `git -c core.fsmonitor=false -c core.hooksPath=/dev/null -c core.untrackedCache=false -c log.showSignature=false --no-optional-locks`, with system and global git config off. Nothing is fetched: the upstream branch is as of your last fetch. All of them run at once and get 500 ms; a git that is missing, fails or is slower is left out of evidence, never a mistrial. `git status` and `git diff` are never run: a repository's own config can make them run programs (a clean filter, an external diff) that these flags do not turn off.
+
 ## How a verdict becomes a decision
 
 The court can only tighten your rules, never loosen them.
@@ -104,11 +117,12 @@ It is theatre on top of your permission rules. Matching is by spelling and best 
 
 - **Cost:** three Haiku calls per trial (prosecution and defense at once, then the judge). Ordinary commands and contempt cost nothing.
 - **What it reads:** your latest message and Claude's latest message (`$.session.messages`), quoted to the court as evidence.
+- **What it runs:** the read-only git commands under [Exhibits](#exhibits) (`$.process.run`), and nothing else.
 - **What it keeps:** the docket, in the mod's own store (`$.store`), as above. Nothing else is written.
 - **Sound:** the gavel (`sounds/gavel.wav`) and the spoken verdict play through `afplay` and `say` on macOS; elsewhere the court is silent.
-- **Everything it calls,** as `claude plugin validate .` reports: `$.audio.play`, `$.audio.speak`, `$.clock.after`, `$.clock.sleep`, `$.command.register`, `$.model.complete`, `$.session.messages`, `$.state`, `$.store`, `$.ui.open`, `$.ui.resolve`. The animations run in two surface modules (`hooks/clients/`) on the drawing's own frame clock.
+- **Everything it calls,** as `claude plugin validate .` reports: `$.audio.play`, `$.audio.speak`, `$.clock.after`, `$.clock.sleep`, `$.command.register`, `$.model.complete`, `$.process.run`, `$.session.messages`, `$.state`, `$.store`, `$.ui.open`, `$.ui.resolve`. The animations run in two surface modules (`hooks/clients/`) on the drawing's own frame clock.
 
-No file system, process or network access. [PRIVACY.md](PRIVACY.md) lists exactly what is sent to the model and what is kept, and how to delete it.
+No file system or network access, and no process but those git commands. [PRIVACY.md](PRIVACY.md) lists exactly what is sent to the model and what is kept, and how to delete it.
 
 ## Development
 

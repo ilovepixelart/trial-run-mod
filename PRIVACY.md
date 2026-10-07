@@ -10,10 +10,11 @@ For each trial, the mod makes three model calls through Claude Code's own model 
 
 - the charge label, such as `force push`;
 - the command as written;
+- the exhibits: counts and states the court read from git on this machine (see "Exhibits" in the README), such as how many commits the upstream branch has that yours lacks and by how many distinct authors, or whether a path is tracked. Author addresses are counted locally and never sent; a path is named as the command names it, cut to 60 characters with control characters removed;
 - your latest message and Claude's latest message, each cut to its last 600 characters;
 - for the judge, also the prosecution's and the defense's speeches.
 
-These calls go wherever Claude Code sends its own model requests, under your Claude Code account and settings. The mod makes no network calls of its own and sends no telemetry.
+The git commands run locally and fetch nothing. These calls go wherever Claude Code sends its own model requests, under your Claude Code account and settings. The mod makes no network calls of its own and sends no telemetry.
 
 ## What it keeps
 
