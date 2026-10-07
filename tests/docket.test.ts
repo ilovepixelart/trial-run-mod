@@ -161,6 +161,14 @@ describe('docket', () => {
       expect(precedentOf([heard(1, 'acquitted', { command: '/bin/rm -rf dist' })], sought)).toBeUndefined()
     })
 
+    test('a wrapped command line never follows precedent', () => {
+      expect(precedentOf([heard(1, 'acquitted')], sought)?.number).toBe(1)
+      for (const command of ['command /bin/rm -rf dist', 'nice ./rm -rf dist', 'env rm -rf dist', 'time rm -rf dist', 'command rm -rf dist', '/usr/bin/env rm -rf dist']) {
+        expect(precedentOf([heard(1, 'acquitted')], { ...sought, command }), command).toBeUndefined()
+        expect(precedentOf([heard(1, 'acquitted', { command })], { ...sought, command }), command).toBeUndefined()
+      }
+    })
+
     test('a later conviction under another spelling still overturns an acquittal', () => {
       expect(precedentOf([heard(1, 'acquitted'), heard(2, 'guilty', { command: '/bin/rm -rf dist' })], sought)).toBeUndefined()
     })
