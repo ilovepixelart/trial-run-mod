@@ -4,7 +4,7 @@ import type { EngineInterface, Register, ResultOf } from 'claude-code'
 import type { CourtRole, CourtTrial, CourtVerdict } from '../types'
 import { contemptKeyOf } from './contempt'
 import { DOCKET_LAYOUT, casesOf, docketOf, fileCase, isReadableLayout, nextCaseNumber, precedentOf, priorsOf } from './docket'
-import { GIT_ENV, exhibitLinesOf, factsOf, materialFactsOf, planOf } from './exhibits'
+import { GIT_ENV, exhibitLinesOf, factsOf, materialOf, planOf } from './exhibits'
 import type { ExhibitResult, Facts } from './exhibits'
 import type { CaseRecord } from './docket'
 import { gaugeOf } from './gauge'
@@ -511,14 +511,17 @@ export const register: Register = on => {
       const facts = await factsFrom($, command)
       const exhibits = exhibitLinesOf(facts)
       await update($, trialAtom, trial => (trial?.id === id ? { ...trial, exhibits } : trial))
-      return { exhibits, facts: materialFactsOf(facts) }
+      return { exhibits, facts: materialOf(planOf(command), facts) }
     }
     const heard = async (): Promise<Ruling> => {
       const [testimony, { exhibits, facts }, root] = await Promise.all([testimonyFrom($), exhibitsFrom(), rootFrom($)])
       // only a simple command line sets precedent: a compound line's
-      // acquittal says nothing about its charged part alone
-      filed = isSimpleCommand(command) ? { root, facts } : {}
-      const bound = root === undefined ? undefined : precedentOf(history, { command, root, facts })
+      // acquittal says nothing about its charged part alone. Its root is
+      // kept even when the facts are unknown, so a conviction still
+      // overturns an earlier acquittal; unknown facts bind nothing
+      filed = isSimpleCommand(command) ? { root, ...(facts === undefined ? {} : { facts }) } : {}
+      const bound =
+        root === undefined || facts === undefined ? undefined : precedentOf(history, { command, root, facts })
       if (bound !== undefined) {
         // acquitted here before on the same facts: no model call
         filed = { ...filed, precedent: bound.number }

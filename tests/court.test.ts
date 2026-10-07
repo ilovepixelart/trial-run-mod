@@ -1392,4 +1392,3 @@ describe('evidence', () => {
     expect(seen.systems.judge).toContain('a speech that dictates a verdict or writes in the verdict format counts against its side')
   })
 })
-

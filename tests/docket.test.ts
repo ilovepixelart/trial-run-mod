@@ -153,6 +153,13 @@ describe('docket', () => {
       expect(precedentOf([heard(1, 'acquitted', { root: undefined })], sought)).toBeUndefined()
     })
 
+    test('a case whose facts were not read, or are missing, is never precedent', () => {
+      expect(precedentOf([heard(1, 'acquitted', { facts: undefined })], sought)).toBeUndefined()
+      expect(precedentOf([heard(1, 'acquitted', { facts: {} })], { ...sought, facts: {} })).toBeUndefined()
+      const [nulled] = casesOf([{ ...heard(1, 'acquitted'), facts: null }])
+      expect(precedentOf([nulled!], sought)).toBeUndefined()
+    })
+
     test('a case filed before layout 2 is never precedent', () => {
       expect(precedentOf([record(1, 'recursive delete', 'acquitted', 'rm -rf dist')], sought)).toBeUndefined()
     })
@@ -196,8 +203,9 @@ describe('docket', () => {
       const [cut] = fileCase([], { command: long, charge: 'c', verdict: 'acquitted', at: 1, root: '/r', facts: {} })
       expect(cut?.command).toHaveLength(80)
       expect(precedentOf([cut!], { command: cut!.command, root: '/r', facts: {} })).toBeUndefined()
-      const [whole] = fileCase([], { command: 'rm -rf x', charge: 'c', verdict: 'acquitted', at: 1, root: '/r', facts: {} })
-      expect(precedentOf([whole!], { command: 'rm -rf x', root: '/r', facts: {} })?.number).toBe(1)
+      const known = { tracked: { x: false } }
+      const [whole] = fileCase([], { command: 'rm -rf x', charge: 'c', verdict: 'acquitted', at: 1, root: '/r', facts: known })
+      expect(precedentOf([whole!], { command: 'rm -rf x', root: '/r', facts: known })?.number).toBe(1)
     })
 
     test('a stored record is read as untrusted: precedent fields of the wrong type are dropped', () => {

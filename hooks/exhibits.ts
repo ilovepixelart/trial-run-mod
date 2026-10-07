@@ -254,6 +254,22 @@ export const exhibitLinesOf = (facts: Facts): string[] => {
 }
 
 /**
+ * The facts precedent compares, only when every one the plan asks for was
+ * read in a repository: undefined when any is unknown (no git, not a
+ * repository, no upstream, a timeout, unreadable output) or the charge has
+ * none, so a failed exhibit can never stand in for a known one.
+ *
+ * @param plan the commands, as `planOf` gave them
+ * @param facts what they returned, as `factsOf` read it
+ */
+export const materialOf = (plan: readonly ExhibitQuery[], facts: Facts): MaterialFacts | undefined => {
+  const asked = plan.filter(one => one.kind === 'behind' || one.kind === 'tracked')
+  const isRead = (one: ExhibitQuery) =>
+    one.kind === 'behind' ? facts.behind !== undefined : one.target !== undefined && facts.tracked?.[one.target] !== undefined
+  return asked.length > 0 && facts.isRepo === true && asked.every(isRead) ? materialFactsOf(facts) : undefined
+}
+
+/**
  * The facts precedent compares.
  */
 export const materialFactsOf = (facts: Facts): MaterialFacts => ({
@@ -264,10 +280,15 @@ export const materialFactsOf = (facts: Facts): MaterialFacts => ({
 const trackedOf = (facts: MaterialFacts) =>
   JSON.stringify(Object.entries(facts.tracked ?? {}).toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
 
+const isKnown = (facts: MaterialFacts) => facts.behind !== undefined || Object.keys(facts.tracked ?? {}).length > 0
+
 /**
- * Whether the facts that matter are the same then and now: no upstream
- * commits this branch lacks in either, and every target tracked or not
- * as before.
+ * Whether the facts that matter are the same then and now: something was
+ * known (unknown never equals unknown), no upstream commits this branch
+ * lacks in either, and every target tracked or not as before.
  */
 export const isSameMaterial = (then: MaterialFacts, now: MaterialFacts): boolean =>
-  then.behind === now.behind && (now.behind === undefined || now.behind === 0) && trackedOf(then) === trackedOf(now)
+  isKnown(now) &&
+  then.behind === now.behind &&
+  (now.behind === undefined || now.behind === 0) &&
+  trackedOf(then) === trackedOf(now)

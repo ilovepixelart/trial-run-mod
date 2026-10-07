@@ -1,6 +1,6 @@
 import { describe, expect, test, tier } from 'claude-code/testing'
 
-import { GIT_ENV, GIT_HARDENING, exhibitLinesOf, factsOf, materialFactsOf, planOf, sanitizedOf } from '../hooks/exhibits'
+import { GIT_ENV, GIT_HARDENING, exhibitLinesOf, factsOf, isSameMaterial, materialFactsOf, materialOf, planOf, sanitizedOf } from '../hooks/exhibits'
 import type { ExhibitQuery } from '../hooks/exhibits'
 
 tier('user')
@@ -162,4 +162,28 @@ describe('exhibits', () => {
     expect(materialFactsOf({ isRepo: true, tracked: { src: true }, untracked: { src: 1 } })).toEqual({ tracked: { src: true } })
     expect(materialFactsOf({})).toEqual({})
   })
+
+  test('material facts exist only when every one the plan asks for was read', () => {
+    const push = planOf('git push --force origin main')
+    expect(materialOf(push, { isRepo: true, behind: 0, upstreamAuthors: 1 })).toEqual({ behind: 0 })
+    expect(materialOf(push, { isRepo: true, upstreamAuthors: 1 })).toBeUndefined()
+    expect(materialOf(push, { isRepo: false })).toBeUndefined()
+    expect(materialOf(push, { behind: 0 })).toBeUndefined()
+    const rm = planOf('rm -rf a b')
+    expect(materialOf(rm, { isRepo: true, tracked: { a: false, b: true } })).toEqual({ tracked: { a: false, b: true } })
+    expect(materialOf(rm, { isRepo: true, tracked: { a: false } })).toBeUndefined()
+    expect(materialOf(planOf('git clean -fd'), { isRepo: true, untracked: { '.': 0 } })).toBeUndefined()
+    expect(materialOf(planOf('git reset --hard HEAD~1'), { isRepo: true, ahead: 0 })).toBeUndefined()
+    expect(materialOf(planOf('terraform destroy'), {})).toBeUndefined()
+    expect(materialOf(planOf('rm -rf'), { isRepo: true })).toBeUndefined()
+  })
+
+  test('unknown never equals unknown: facts match only when something was known and is the same', () => {
+    expect(isSameMaterial({}, {})).toBe(false)
+    expect(isSameMaterial({ tracked: {} }, { tracked: {} })).toBe(false)
+    expect(isSameMaterial({ behind: 0 }, { behind: 0 })).toBe(true)
+    expect(isSameMaterial({ tracked: { a: false } }, { tracked: { a: false } })).toBe(true)
+    expect(isSameMaterial({}, { tracked: { a: false } })).toBe(false)
+  })
 })
+
