@@ -42,7 +42,9 @@ const isGit = (words: readonly string[], sub: string) =>
 /**
  * The charges, in the order the court tries them; the first that fits is
  * read out. Matching is by spelling and best effort: a command assembled at
- * run time (a variable, a script file) is not seen.
+ * run time is not seen, such as a flag from a variable (`rm $F src`),
+ * `eval "$CMD"`, `source <(curl ...)`, an alias, or a script file a shell is
+ * given by name (`bash x.sh`).
  */
 export const RULES: readonly Rule[] = [
   {
