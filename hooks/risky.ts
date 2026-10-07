@@ -443,6 +443,11 @@ type Simple = {
   open: boolean
   /** The simple command as the model wrote it, for the court to read out. */
   text: string
+  /**
+   * The words of the command that runs this one for each file (`find ...
+   * -exec`), to stand for it in place of `words` once charged.
+   */
+  whole?: string[]
 }
 
 /**
@@ -552,7 +557,31 @@ const simpleOf = (words: readonly Word[], segment: string, nested: (script: stri
   const rest = head === undefined ? [] : [program ?? head.text, ...args.map(word => word.text)]
   const inner = start.script ?? innerScriptOf(rest)
   const open = head !== undefined && program === undefined
-  return inner === undefined ? [{ words: rest, open, text: spellingOf(segment) }] : nested(inner)
+  const own = inner === undefined ? [{ words: rest, open, text: spellingOf(segment) }] : nested(inner)
+  const perFile = program === 'find' ? execsOf(args) : []
+  return [...own, ...perFile.flatMap(command => simpleOf(command, segment, nested).map(simple => ({ ...simple, whole: rest })))]
+}
+
+const EXEC_ACTIONS = new Set(['-exec', '-execdir', '-ok', '-okdir'])
+
+/**
+ * The commands a find runs for each file: the words after `-exec`,
+ * `-execdir`, `-ok` or `-okdir`, up to `;` or `+`.
+ */
+const execsOf = (words: readonly Word[]): Word[][] => {
+  const commands: Word[][] = []
+  let command: Word[] | undefined
+  for (const word of words) {
+    if (command === undefined) {
+      command = EXEC_ACTIONS.has(word.text) ? [] : undefined
+    } else if (word.text === ';' || word.text === '+') {
+      commands.push(command)
+      command = undefined
+    } else {
+      command.push(word)
+    }
+  }
+  return command === undefined ? commands : [...commands, command]
 }
 
 /**
@@ -635,13 +664,17 @@ const NOT_SIMPLE_HEADS = new Set([...WRAPPERS, ...SHELLS, ...RUNNERS, 'eval', 's
  * @param command the Bash tool's `command`, as the model wrote it
  */
 export const isSimpleCommand = (command: string): boolean => {
-  const head = command.trim().split(/\s+/)[0] || undefined
+  const [head, ...rest] = command.trim().split(/\s+/)
+  const matched = trialOf(command)?.matched
   return (
     PLAIN_LINE.test(command) &&
     !TILDE.test(command) &&
     head !== undefined &&
+    head !== '' &&
     !head.includes('=') &&
-    !NOT_SIMPLE_HEADS.has(nameOf(head))
+    !NOT_SIMPLE_HEADS.has(nameOf(head)) &&
+    // charged on its own words, never on a command it runs (`find -exec`)
+    (matched === undefined || matched.join(' ') === [nameOf(head), ...rest].join(' '))
   )
 }
 
@@ -660,12 +693,22 @@ export const chargeOf = (command: string): Charge | undefined => chargedOf(comma
  * @param command the Bash tool's `command`, as the model wrote it
  */
 export const chargedOf = (command: string): { charge: Charge; words: readonly string[] } | undefined => {
-  for (const { words, open, text } of segmentsOf(command).flatMap(segment => commandsOf(segment))) {
+  const trial = trialOf(command)
+  return trial === undefined ? undefined : { charge: trial.charge, words: trial.words }
+}
+
+/**
+ * The charge, the words that stand for the charged command, and the words
+ * the charge was matched on (those of the command run per file, for a
+ * `find -exec`).
+ */
+const trialOf = (command: string): { charge: Charge; words: readonly string[]; matched: readonly string[] } | undefined => {
+  for (const { words, open, text, whole } of segmentsOf(command).flatMap(segment => commandsOf(segment))) {
     const tried = open ? PROGRAMS.map(program => [program, ...words.slice(1)]) : [words]
     for (const one of tried) {
       const rule = RULES.find(candidate => candidate.test(one))
       if (rule) {
-        return { charge: { id: rule.id, label: rule.label, command: text }, words: one }
+        return { charge: { id: rule.id, label: rule.label, command: text }, words: whole ?? one, matched: one }
       }
     }
   }

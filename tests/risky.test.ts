@@ -258,6 +258,35 @@ describe('risky', () => {
     }
   })
 
+  test('a command find runs for each file is charged, and is read out as the whole find', () => {
+    for (const command of [
+      'find . -name src -exec rm -rf {} +',
+      'find . -execdir rm -rf {} \\;',
+      'find . -execdir rm -rf {} ;',
+      'find . -ok rm -rf {} \\;',
+      'find . -okdir rm -r {} +',
+      'find . -type d -exec sudo rm -rf {} +',
+      "find . -exec sh -c 'rm -rf \"$1\"' _ {} \\;",
+      'find . -name x -print -exec rm -rf {} +',
+      'find . -exec echo {} + -exec rm -rf {} +',
+    ]) {
+      expect(chargeOf(command)?.id, command).toBe('recursive-delete')
+    }
+    expect(chargedOf('find . -name a -exec rm -rf {} +')?.words).toEqual(['find', '.', '-name', 'a', '-exec', 'rm', '-rf', '{}', '+'])
+  })
+
+  test('a find that runs nothing harmful for each file is not charged', () => {
+    for (const command of ['find . -name x -print', 'find . -exec ls -R {} +', 'find . -name "*.tmp" -exec rm {} \\;', 'find . -name rm -print']) {
+      expect(chargeOf(command), command).toBeUndefined()
+    }
+  })
+
+  test('xargs is looked through whatever its options', () => {
+    for (const command of ["printf 'src\\0' | xargs -0 rm -rf", 'echo src | xargs -I{} rm -rf {}', 'echo src | xargs -I {} rm -rf {}', 'echo src | xargs -n 1 -P 4 rm -rf']) {
+      expect(chargeOf(command)?.id, command).toBe('recursive-delete')
+    }
+  })
+
   test('a nested script with a separator inside its quotes is read whole, as the inner shell reads it', () => {
     const cases: readonly (readonly [string, string])[] = [
       ['bash -c "echo hi; \\"rm\\" -rf src"', 'recursive-delete'],
@@ -467,6 +496,8 @@ describe('risky', () => {
       'watch rm -rf src',
       '=rm -rf src',
       'coproc rm -rf src',
+      'find . -exec rm -rf src +',
+      'find . -okdir rm -rf src +',
       '/bin/bash -c rm',
       '"$RM" -rf src',
       '"${RM}" -rf src',
