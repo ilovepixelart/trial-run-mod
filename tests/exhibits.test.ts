@@ -318,6 +318,18 @@ describe('exhibits', () => {
     expect(planOf('rm -rf node_modules').map(query => query.kind)).toEqual(['inside', 'tracked', 'untracked', 'ignored', 'indexed'])
   })
 
+  test('a target with a .. part, or in the repository store, gets no target query', () => {
+    // git reads `lnk/../src` as src; the kernel follows lnk first. `.git` is
+    // never tracked or listed, so it reads as an empty, clean folder
+    for (const command of ['rm -rf lnk/../src', 'rm -rf ../app/src', 'rm -rf src/..', 'rm -rf .git', 'rm -rf .git/refs', 'rm -rf src .git', 'rm -rf vendor/lib/.git']) {
+      expect(planOf(command).map(query => query.kind), command).toEqual(['inside'])
+    }
+    // a name that only contains them is a name like any other
+    for (const command of ['rm -rf src..old', 'rm -rf .github', 'rm -rf .gitignore', 'rm -rf a.git', 'rm -rf ./src']) {
+      expect(targetsIn(planOf(command)), command).toHaveLength(1)
+    }
+  })
+
   test('one unread target removes every target fact', () => {
     const plan = planOf('rm -rf a b')
     // per target: tracked, untracked, ignored, indexed

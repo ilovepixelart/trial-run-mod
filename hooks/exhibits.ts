@@ -134,13 +134,22 @@ const targetsOf = (words: readonly string[]): string[] => {
 }
 
 /**
+ * Whether git can be asked about a target exactly as `rm` will remove it:
+ * not ending in `/` (which follows a symlink to a directory git never
+ * looks into), with no `..` part (git folds `lnk/..` by spelling, the
+ * kernel follows `lnk` first) and no `.git` part (the repository's own
+ * store, which git never lists, so it reads as an empty, clean folder).
+ */
+const isReadableTarget = (target: string) =>
+  !target.endsWith('/') && !target.split('/').some(part => part === '..' || part === '.git')
+
+/**
  * The targets git can be asked about exactly as `rm` will remove them: at
- * most three, none ending in `/` (which follows a symlink to a directory
- * git never looks into). Otherwise none, and the targets are unknown.
+ * most three, each readable. Otherwise none, and the targets are unknown.
  */
 const readableTargetsOf = (words: readonly string[]): string[] => {
   const targets = targetsOf(words)
-  return targets.length > MAX_TARGETS || targets.some(target => target.endsWith('/')) ? [] : targets
+  return targets.length > MAX_TARGETS || !targets.every(isReadableTarget) ? [] : targets
 }
 
 /**
