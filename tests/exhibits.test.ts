@@ -16,7 +16,7 @@ const ALLOWED = [
   ['rev-parse', '--is-inside-work-tree'],
   ['rev-list', '--count', 'HEAD..@{upstream}'],
   ['rev-list', '--count', '@{upstream}..HEAD'],
-  ['log', '-20', '--no-show-signature', '--format=%ae', '@{upstream}'],
+  ['log', '-20', '--no-show-signature', '--format=%ae', 'HEAD..@{upstream}'],
 ]
 
 const isAllowed = (args: readonly string[]) =>

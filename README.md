@@ -50,7 +50,7 @@ Before counsel speaks, the court reads a few facts from git in the directory the
 
 | Charge | What git is asked |
 | --- | --- |
-| force push | `git rev-list --count HEAD..@{upstream}`: the upstream commits this branch lacks; `git log -20 --no-show-signature --format=%ae @{upstream}`: how many distinct authors wrote the last 20 (the addresses are counted on this machine, never shown or sent) |
+| force push | `git rev-list --count HEAD..@{upstream}`: the upstream commits this branch lacks; `git log -20 --no-show-signature --format=%ae HEAD..@{upstream}`: how many distinct authors wrote those commits (up to 20) (the addresses are counted on this machine, never shown or sent) |
 | hard reset | `git rev-list --count @{upstream}..HEAD`: the local commits not on the upstream branch |
 | recursive delete with `rm` | for each of the first 3 paths: `git ls-files --error-unmatch -- <path>` (tracked or not) and `git ls-files --others --exclude-standard -- <path>` (how many untracked files under it) |
 | git clean | `git ls-files --others --exclude-standard`, plus `--ignored` when `-x` is given |

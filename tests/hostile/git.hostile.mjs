@@ -190,7 +190,8 @@ for (const [name, configOf] of [
     assert.equal(behind?.stdout.trim(), '1')
     assert.equal(outputs.find(one => one.kind === 'tracked' && one.target === '-rf')?.status, 0)
     assert.equal(outputs.find(one => one.kind === 'tracked' && one.target === '--output=pwned-output')?.status, 1)
-    assert.match(outputs.find(one => one.kind === 'authors')?.stdout ?? '', /u@example\.com/)
+    // only the upstream commits this branch lacks are counted, not the shared ones
+    assert.equal(outputs.find(one => one.kind === 'authors')?.stdout.trim(), 'u@example.com')
   })
 
   test(`the hostile ${name} repository is live: plain git status and diff run its programs`, () => {

@@ -58,7 +58,7 @@ export type Facts = {
   behind?: number
   /** Local commits not on the upstream branch. */
   ahead?: number
-  /** Distinct authors of the upstream branch's last 20 commits. */
+  /** Distinct authors of the upstream commits this branch lacks (up to 20). */
   upstreamAuthors?: number
   /** Whether each delete target is tracked by git. */
   tracked?: Record<string, boolean>
@@ -121,7 +121,7 @@ export const planOf = (command: string): ExhibitQuery[] => {
       return [
         INSIDE,
         query('behind', git('rev-list', '--count', 'HEAD..@{upstream}')),
-        query('authors', git('log', '-20', '--no-show-signature', '--format=%ae', '@{upstream}')),
+        query('authors', git('log', '-20', '--no-show-signature', '--format=%ae', 'HEAD..@{upstream}')),
       ]
     case 'hard-reset':
       return [INSIDE, query('ahead', git('rev-list', '--count', '@{upstream}..HEAD'))]
