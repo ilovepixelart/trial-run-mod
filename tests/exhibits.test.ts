@@ -177,13 +177,13 @@ describe('exhibits', () => {
     expect(exhibitLinesOf({ isRepo: true, ahead: 0 })).toEqual([
       'Exhibit A: every local commit is on the upstream branch; uncommitted changes were not checked.',
     ])
-    expect(exhibitLinesOf({ isRepo: true, tracked: { src: true, 'tmp\u0007x': false }, untracked: { src: 0, 'tmp\u0007x': 4 } })).toEqual([
+    expect(exhibitLinesOf({ isRepo: true, tracked: { src: true, 'tmp\u0007x': false }, untracked: { src: 0, 'tmp\u0007x': 4 }, modifiedIn: { src: 0 } })).toEqual([
       'Exhibit A: src is tracked by git, so history keeps it.',
       'Exhibit B: tmpx is not tracked by git, so history does not keep it.',
       'Exhibit C: tmpx holds 4 untracked files.',
     ])
     // ignored files under a target are named: a delete takes them, and history never had them
-    expect(exhibitLinesOf({ isRepo: true, tracked: { src: true }, untracked: { src: 0 }, ignoredIn: { src: 1 } })).toEqual([
+    expect(exhibitLinesOf({ isRepo: true, tracked: { src: true }, untracked: { src: 0 }, ignoredIn: { src: 1 }, modifiedIn: { src: 0 } })).toEqual([
       'Exhibit A: src is tracked by git, so history keeps it.',
       'Exhibit B: src holds 1 ignored file, which history does not keep.',
     ])
@@ -198,6 +198,20 @@ describe('exhibits', () => {
     expect(exhibitLinesOf({ isRepo: false })).toEqual(['Exhibit A: this is not a git repository.'])
     expect(exhibitLinesOf({})).toEqual([])
     expect(exhibitLinesOf({ isRepo: true, behind: 1, upstreamAuthors: 3 }).join(' ')).not.toContain('@')
+  })
+
+  test('a tracked target whose changes were not counted never reassures alone', () => {
+    // a file as new as the index, or more files than the court stats
+    expect(exhibitLinesOf({ isRepo: true, tracked: { src: true }, untracked: { src: 0 }, ignoredIn: { src: 0 } })).toEqual([
+      'Exhibit A: src is tracked by git, so history keeps its last commit; uncommitted changes under it were not checked.',
+    ])
+    expect(exhibitLinesOf({ isRepo: true, tracked: { src: true }, untracked: { src: 0 }, ignoredIn: { src: 0 }, modifiedIn: { src: 0 } })).toEqual([
+      'Exhibit A: src is tracked by git, so history keeps it.',
+    ])
+    // an untracked target has no index entries to count: history keeps none of it either way
+    expect(exhibitLinesOf({ isRepo: true, tracked: { a: false }, untracked: { a: 0 } })).toEqual([
+      'Exhibit A: a is not tracked by git, so history does not keep it.',
+    ])
   })
 
   test('the facts that matter for precedent: upstream ahead and each target tracked or not', () => {

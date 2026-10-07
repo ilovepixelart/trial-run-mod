@@ -330,6 +330,10 @@ describe('the world changes between two identical commands', () => {
       await $.tool.check(check('rm -rf src'))
 
       expect(seen.calls).toHaveLength(6)
+      expect(seen.prompts.judge).toContain(
+        '<exhibit>Exhibit A: src is tracked by git, so history keeps its last commit; uncommitted changes under it were not checked.</exhibit>',
+      )
+      expect(seen.prompts.judge).not.toContain('so history keeps it.')
     })
 
     test('an index file the court cannot stat leaves the target unknown and tried', async ($, on) => {

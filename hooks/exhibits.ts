@@ -499,7 +499,15 @@ export const exhibitLinesOf = (facts: Facts): string[] => {
   }
   for (const [target, isTracked] of Object.entries(facts.tracked ?? {})) {
     const name = sanitizedOf(target, NAME_CELLS)
-    said.push(isTracked ? `${name} is tracked by git, so history keeps it.` : `${name} is not tracked by git, so history does not keep it.`)
+    // changes under a tracked target go uncounted when a file is as new as
+    // the index or there are too many: the line says so rather than reassure
+    said.push(
+      !isTracked
+        ? `${name} is not tracked by git, so history does not keep it.`
+        : facts.modifiedIn?.[target] === undefined
+          ? `${name} is tracked by git, so history keeps its last commit; uncommitted changes under it were not checked.`
+          : `${name} is tracked by git, so history keeps it.`,
+    )
   }
   for (const [target, count] of Object.entries(facts.untracked ?? {})) {
     if (target === '.') {
