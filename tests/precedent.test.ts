@@ -13,7 +13,7 @@ const check = (command: string) => ({ tool: 'Bash', input: { command } })
  * What the first query prints in /work/app on main: inside, the top level,
  * the directory within it (none) and the branch.
  */
-const HERE = 'true\n/work/app\n\nmain\n'
+const HERE = 'true\n/work/app\n\nmain\n.git/index\n'
 
 describe('precedent fails closed', () => {
   type Git = (argv: readonly string[]) => ReturnType<typeof gitSaid> | Promise<ReturnType<typeof gitSaid>>
@@ -266,6 +266,10 @@ describe('the world changes between two identical commands', () => {
 
   describe('work under a tracked target', () => {
     type Tree = { untracked: string; ignored: string; size: number }
+    // the index file was written after every file under src last changed
+    const fileAt = (path: string, size: number) => ({
+      kind: 'file' as const, size, mtimeMs: path.endsWith('/.git/index') ? 200_000 : 100_250, isLink: false,
+    })
     const clean: Tree = { untracked: '', ignored: '', size: 5 }
     const treeGit = (tree: () => Tree) => (argv: readonly string[]) => {
       if (argv.includes('rev-parse')) {
@@ -293,7 +297,7 @@ describe('the world changes between two identical commands', () => {
         mock.clock(on)
         memoryStore(on)
         let tree = clean
-        const fs = (path: string, resolve: boolean) => plainStat(path, resolve, { kind: 'file', size: tree.size, mtimeMs: 100_250, isLink: false })
+        const fs = (path: string, resolve: boolean) => plainStat(path, resolve, fileAt(path, tree.size))
         const seen = seatCourt(on, { ...verdictBench(ACQUITTED), git: treeGit(() => tree), root: () => '/work/app', fs })
 
         await $.tool.check(check('rm -rf src'))
@@ -304,10 +308,34 @@ describe('the world changes between two identical commands', () => {
       })
     }
 
+    test('a file as new as the index is racily clean: the target is unknown and tried', async ($, on) => {
+      mock.clock(on)
+      memoryStore(on)
+      const racy = (path: string, resolve: boolean) => plainStat(path, resolve, { kind: 'file', size: 5, mtimeMs: 100_250, isLink: false })
+      const seen = seatCourt(on, { ...verdictBench(ACQUITTED), git: treeGit(() => clean), root: () => '/work/app', fs: racy })
+
+      await $.tool.check(check('rm -rf src'))
+      await $.tool.check(check('rm -rf src'))
+
+      expect(seen.calls).toHaveLength(6)
+    })
+
+    test('an index file the court cannot stat leaves the target unknown and tried', async ($, on) => {
+      mock.clock(on)
+      memoryStore(on)
+      const fs = (path: string, resolve: boolean) => (path.endsWith('/.git/index') ? undefined : plainStat(path, resolve, fileAt(path, 5)))
+      const seen = seatCourt(on, { ...verdictBench(ACQUITTED), git: treeGit(() => clean), root: () => '/work/app', fs })
+
+      await $.tool.check(check('rm -rf src'))
+      await $.tool.check(check('rm -rf src'))
+
+      expect(seen.calls).toHaveLength(6)
+    })
+
     test('a clean tracked target still follows precedent', async ($, on) => {
       mock.clock(on)
       memoryStore(on)
-      const fs = (path: string, resolve: boolean) => plainStat(path, resolve, { kind: 'file', size: 5, mtimeMs: 100_250, isLink: false })
+      const fs = (path: string, resolve: boolean) => plainStat(path, resolve, fileAt(path, 5))
       const seen = seatCourt(on, { ...verdictBench(ACQUITTED), git: treeGit(() => clean), root: () => '/work/app', fs })
 
       await $.tool.check(check('rm -rf src'))

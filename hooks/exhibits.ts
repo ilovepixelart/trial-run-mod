@@ -60,6 +60,8 @@ export type Facts = {
   top?: string
   prefix?: string
   branch?: string
+  /** The index file, as git names it from the working directory. */
+  indexPath?: string
   /** Commits on the upstream branch this branch lacks. */
   behind?: number
   /** Local commits not on the upstream branch. */
@@ -106,7 +108,10 @@ const git = (...args: string[]): readonly string[] => ['git', ...GIT_HARDENING, 
 const query = (kind: ExhibitKind, argv: readonly string[], target?: string): ExhibitQuery =>
   target === undefined ? { kind, argv } : { kind, argv, target }
 
-const INSIDE = query('inside', git('rev-parse', '--is-inside-work-tree', '--show-toplevel', '--show-prefix', '--abbrev-ref', 'HEAD'))
+const INSIDE = query(
+  'inside',
+  git('rev-parse', '--is-inside-work-tree', '--show-toplevel', '--show-prefix', '--abbrev-ref', 'HEAD', '--git-path', 'index'),
+)
 
 /**
  * The operands of an `rm`: its words after the command that are not flags,
@@ -209,7 +214,7 @@ export const planOf = (command: string): ExhibitQuery[] => {
               query('ignored', git('ls-files', '--others', '--ignored', '--exclude-standard', '--', target), target),
               // the index's own record of each file, never the files: every git
               // that compares them can run the repository's filters
-              query('indexed', git('ls-files', '--debug', '--', target), target),
+              query('indexed', git('-c', 'core.quotePath=false', 'ls-files', '--debug', '--', target), target),
             ]),
           ]
     case 'git-clean':
@@ -228,22 +233,37 @@ export const planOf = (command: string): ExhibitQuery[] => {
 }
 
 /**
- * The entries `ls-files --debug` prints: each path, then its index stat on
- * indented lines, of which the court keeps the size and the mtime.
+ * The five lines `ls-files --debug` prints under each path, in order.
  */
-const entriesOf = (stdout: string): IndexEntry[] => {
+const STAT_LINES = [
+  /^ {2}ctime: \d+:\d+$/,
+  /^ {2}mtime: (\d+):(\d+)$/,
+  /^ {2}dev: \d+\tino: \d+$/,
+  /^ {2}uid: \d+\tgid: \d+$/,
+  /^ {2}size: (\d+)\tflags: [0-9a-f]+$/,
+] as const
+
+/**
+ * The entries `ls-files --debug` prints, read strictly: each a path line
+ * then exactly the five stat lines. A quoted path (a name git escapes
+ * even with core.quotePath off: a newline, a quote, a control character),
+ * an indented or empty path, or any other line means the read is not
+ * exact, and the answer is undefined.
+ */
+const entriesOf = (stdout: string): IndexEntry[] | undefined => {
+  const lines = stdout.split('\n')
+  if (lines.at(-1) === '') {
+    lines.pop()
+  }
   const entries: IndexEntry[] = []
-  for (const line of stdout.split('\n')) {
-    const mtime = /^\s+mtime: (\d+):(\d+)$/.exec(line)
-    const size = /^\s+size: (\d+)\b/.exec(line)
-    const last = entries.at(-1)
-    if (line !== '' && !/^\s/.test(line)) {
-      entries.push({ path: line, size: Number.NaN, mtimeMs: Number.NaN })
-    } else if (mtime && last) {
-      last.mtimeMs = Number(mtime[1]) * 1000 + Number(mtime[2]) / 1e6
-    } else if (size && last) {
-      last.size = Number(size[1])
+  for (let at = 0; at < lines.length; at += 6) {
+    const path = lines[at] ?? ''
+    const stats = STAT_LINES.map((line, offset) => line.exec(lines[at + 1 + offset] ?? ''))
+    const [, mtime, , , size] = stats
+    if (path === '' || /^\s/.test(path) || path.startsWith('"') || !mtime || !size || stats.includes(null)) {
+      return undefined
     }
+    entries.push({ path, size: Number(size[1]), mtimeMs: Number(mtime[1]) * 1000 + Number(mtime[2]) / 1e6 })
   }
   return entries
 }
@@ -269,8 +289,11 @@ export const factsOf = (plan: readonly ExhibitQuery[], results: readonly Exhibit
     const out = result.stdout.trim()
     switch (one.kind) {
       case 'inside': {
-        const [inside, top = '', prefix, branch = ''] = result.stdout.split('\n')
+        const [inside, top = '', prefix, branch = '', indexPath = ''] = result.stdout.split('\n')
         facts.isRepo = result.exitCode === 0 && inside === 'true'
+        if (facts.isRepo && indexPath !== '') {
+          facts.indexPath = indexPath
+        }
         // a detached HEAD prints HEAD for every commit: it names no branch
         if (facts.isRepo && top !== '' && prefix !== undefined && branch !== '' && branch !== 'HEAD') {
           Object.assign(facts, { top, prefix, branch })
@@ -303,11 +326,13 @@ export const factsOf = (plan: readonly ExhibitQuery[], results: readonly Exhibit
           facts.untracked = { ...facts.untracked, [one.target ?? '.']: countOf(out) }
         }
         break
-      case 'indexed':
-        if (result.exitCode === 0 && one.target !== undefined) {
-          facts.indexed = { ...facts.indexed, [one.target]: entriesOf(result.stdout) }
+      case 'indexed': {
+        const entries = result.exitCode === 0 ? entriesOf(result.stdout) : undefined
+        if (entries !== undefined && one.target !== undefined) {
+          facts.indexed = { ...facts.indexed, [one.target]: entries }
         }
         break
+      }
       case 'ignored':
         if (result.exitCode === 0 && one.target !== undefined) {
           facts.ignoredIn = { ...facts.ignoredIn, [one.target]: countOf(out) }
@@ -320,14 +345,14 @@ export const factsOf = (plan: readonly ExhibitQuery[], results: readonly Exhibit
   // the targets are read together or not at all: one unread leaves every
   // target unknown, never a partial picture
   const targets = plan.filter(one => one.target !== undefined)
+  // every per-target read is required; a kind not listed here reads as unread
   const readFor: Partial<Record<ExhibitKind, Record<string, unknown> | undefined>> = {
     tracked: facts.tracked,
     untracked: facts.untracked,
     ignored: facts.ignoredIn,
+    indexed: facts.indexed,
   }
-  const isEveryTargetRead = targets
-    .filter(one => one.kind in readFor)
-    .every(one => readFor[one.kind]?.[one.target ?? ''] !== undefined)
+  const isEveryTargetRead = targets.every(one => readFor[one.kind]?.[one.target ?? ''] !== undefined)
   if (!isEveryTargetRead) {
     delete facts.tracked
     delete facts.untracked
@@ -401,18 +426,24 @@ const isUnchanged = (entry: IndexEntry, stat: FsStat) =>
 
 /**
  * The facts with each target's changed files counted: an index entry whose
- * file differs in size or time, is a link, or is not a file. A target with
- * an entry the court could not stat, or entries it did not read, is left
- * unknown, never claimed changed.
+ * file differs in size or time, is a link, or is not a file. A target is
+ * left unknown, never claimed changed, when an entry could not be stat'd,
+ * when the index file's own time is unknown, or when a file is not
+ * strictly older than the index file: git's racily clean case, where an
+ * edit keeping size and time looks unchanged.
  *
  * @param stats each path's stat, undefined where it could not be read
+ * @param indexMs the index file's mtime, undefined where unknown
  */
-export const withModified = (facts: Facts, stats: ReadonlyMap<string, FsStat | undefined>): Facts => {
+export const withModified = (facts: Facts, stats: ReadonlyMap<string, FsStat | undefined>, indexMs: number | undefined): Facts => {
   const counted = Object.entries(facts.indexed ?? {}).flatMap(([target, entries]) => {
     const statted = entries.map(entry => [entry, stats.get(entry.path)] as const)
-    return statted.some(([, stat]) => stat === undefined)
-      ? []
-      : [[target, statted.filter(([entry, stat]) => stat === undefined || !isUnchanged(entry, stat)).length] as const]
+    const isReadable = statted.every(
+      ([, stat]) => stat !== undefined && indexMs !== undefined && Math.floor(stat.mtimeMs) < Math.floor(indexMs),
+    )
+    return isReadable
+      ? [[target, statted.filter(([entry, stat]) => stat === undefined || !isUnchanged(entry, stat)).length] as const]
+      : []
   })
   return counted.length === 0 ? facts : { ...facts, modifiedIn: Object.fromEntries(counted) }
 }

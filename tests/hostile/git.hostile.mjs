@@ -17,7 +17,7 @@ registerHooks({
   resolve: (specifier, context, next) =>
     next(specifier.startsWith('.') && !/\.[a-z]+$/.test(specifier) ? `${specifier}.ts` : specifier, context),
 })
-const { GIT_ENV, GIT_HARDENING, planOf } = await import('../../hooks/exhibits.ts')
+const { GIT_ENV, GIT_HARDENING, factsOf, planOf } = await import('../../hooks/exhibits.ts')
 
 /**
  * Every charged command whose plan runs git, with hostile spellings: shell
@@ -206,3 +206,56 @@ for (const [name, configOf] of [
     assert.ok(left(markers).includes('diff-external'), left(markers).join(' '))
   })
 }
+
+/**
+ * Runs a plan as the court does and reads it as the court does.
+ */
+const readIn = (repo, command) => {
+  const plan = planOf(command)
+  const results = plan.map(query => {
+    const ran = spawnSync(query.argv[0], query.argv.slice(1), { cwd: repo, env: { ...process.env, ...GIT_ENV }, stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8', timeout: 10_000 })
+    return ran.error ? undefined : { exitCode: ran.status ?? 1, stdout: ran.stdout }
+  })
+  return factsOf(plan, results)
+}
+
+test('real git index entries are read exactly, and a name git escapes leaves the target unknown', () => {
+  const repo = join(root, 'names')
+  mkdirSync(join(repo, 'plain'), { recursive: true })
+  mkdirSync(join(repo, 'odd'), { recursive: true })
+  git(root, 'init', '-q', '-b', 'main', repo)
+  writeFileSync(join(repo, 'plain', 'spéc.txt'), 'unicode\n')
+  writeFileSync(join(repo, 'odd', 'new\nline.txt'), 'newline\n')
+  writeFileSync(join(repo, 'odd', 'qu"ote.txt'), 'quote\n')
+  git(repo, 'add', '--', '.')
+  git(repo, '-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-q', '-m', 'names')
+
+  const plain = readIn(repo, 'rm -rf plain')
+  assert.equal(plain.indexPath, '.git/index')
+  assert.deepEqual(plain.indexed?.plain?.map(entry => [entry.path, entry.size]), [['plain/spéc.txt', 8]])
+  assert.ok(Number.isFinite(plain.indexed?.plain?.[0]?.mtimeMs))
+  assert.equal(plain.tracked?.plain, true)
+
+  const odd = readIn(repo, 'rm -rf odd')
+  assert.equal(odd.indexed, undefined)
+  assert.equal(odd.tracked, undefined)
+})
+
+test('in a linked worktree the index read is the worktree\'s own', () => {
+  const main = join(root, 'wt-main')
+  const linked = join(root, 'wt-linked')
+  mkdirSync(join(main, 'src'), { recursive: true })
+  git(root, 'init', '-q', '-b', 'main', main)
+  writeFileSync(join(main, 'src', 'a.txt'), 'a\n')
+  git(main, 'add', '--', '.')
+  git(main, '-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-q', '-m', 'one')
+  git(main, 'worktree', 'add', '-q', '-b', 'side', linked)
+
+  const facts = readIn(linked, 'rm -rf src')
+  // .git is a file here: the index lives under the main repository's worktrees
+  assert.equal(facts.branch, 'side')
+  assert.equal(facts.indexPath, join(main, '.git', 'worktrees', 'wt-linked', 'index'))
+  assert.ok(existsSync(facts.indexPath))
+  assert.deepEqual(facts.indexed?.src?.map(entry => entry.path), ['src/a.txt'])
+})
+

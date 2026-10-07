@@ -12,8 +12,13 @@ const ran = (exitCode: number, stdout = '') => ({ exitCode, stdout, stderr: '', 
  */
 const subcommandOf = (query: ExhibitQuery) => query.argv.slice(1 + GIT_HARDENING.length)
 
+/**
+ * The subcommand's name, past any `-c name=value` the query adds.
+ */
+const nameOf = (args: readonly string[]): string => (args[0] === '-c' ? nameOf(args.slice(2)) : args[0] ?? '')
+
 const ALLOWED = [
-  ['rev-parse', '--is-inside-work-tree', '--show-toplevel', '--show-prefix', '--abbrev-ref', 'HEAD'],
+  ['rev-parse', '--is-inside-work-tree', '--show-toplevel', '--show-prefix', '--abbrev-ref', 'HEAD', '--git-path', 'index'],
   ['rev-list', '--count', '@{upstream}..HEAD'],
 ]
 
@@ -34,9 +39,10 @@ const isRangeQuery = (args: readonly string[]) =>
 const isAllowed = (args: readonly string[]) =>
   ALLOWED.some(allowed => allowed.length === args.length && allowed.every((word, i) => word === args[i])) ||
   isRangeQuery(args) ||
+  (args.length === 6 && args[0] === '-c' && args[1] === 'core.quotePath=false' && args[2] === 'ls-files' && args[3] === '--debug' && args[4] === '--') ||
   isPushConfigQuery(args) ||
   (args[0] === 'ls-files' && args.at(-2) === '--' &&
-    [['--error-unmatch'], ['--others', '--exclude-standard'], ['--others', '--ignored', '--exclude-standard'], ['--debug']].some(
+    [['--error-unmatch'], ['--others', '--exclude-standard'], ['--others', '--ignored', '--exclude-standard']].some(
       flags => flags.length === args.length - 3 && flags.every((flag, i) => flag === args[i + 1]),
     )) ||
   (args[0] === 'ls-files' &&
@@ -67,7 +73,7 @@ describe('exhibits', () => {
         expect(query.argv[0], command).toBe('git')
         expect(query.argv.slice(1, 1 + GIT_HARDENING.length), command).toEqual([...GIT_HARDENING])
         expect(isAllowed(subcommandOf(query)), `${command}: ${subcommandOf(query).join(' ')}`).toBe(true)
-        seen.add(subcommandOf(query)[0] ?? '')
+        seen.add(nameOf(subcommandOf(query)))
       }
     }
     expect([...seen].toSorted()).toEqual(['config', 'log', 'ls-files', 'rev-list', 'rev-parse'])
@@ -128,20 +134,22 @@ describe('exhibits', () => {
     expect(facts).toEqual({ isRepo: true, behind: 3, upstreamAuthors: 2 })
 
     const deleted = planOf('rm -rf src')
-    expect(factsOf(deleted, [ran(0, 'true\n'), ran(1), ran(0, 'src/a\nsrc/b\n'), ran(0, '')])).toEqual({
+    expect(factsOf(deleted, [ran(0, 'true\n'), ran(1), ran(0, 'src/a\nsrc/b\n'), ran(0, ''), ran(0, '')])).toEqual({
       isRepo: true,
       tracked: { src: false },
       untracked: { src: 2 },
       ignoredIn: { src: 0 },
+      indexed: { src: [] },
     })
-    expect(factsOf(deleted, [ran(0, 'true\n'), ran(0, 'src/a\n'), ran(0, ''), ran(0, 'src/prod.env\n')])).toEqual({
+    expect(factsOf(deleted, [ran(0, 'true\n'), ran(0, 'src/a\n'), ran(0, ''), ran(0, 'src/prod.env\n'), ran(0, '')])).toEqual({
       isRepo: true,
       tracked: { src: true },
       untracked: { src: 0 },
       ignoredIn: { src: 1 },
+      indexed: { src: [] },
     })
-    expect(factsOf(deleted, [ran(0, 'true\n'), ran(128), ran(128), ran(128)])).toEqual({ isRepo: true })
-    expect(factsOf(deleted, [ran(0, 'true\n'), ran(0, 'src/a\n'), ran(0, ''), ran(128)])).toEqual({ isRepo: true })
+    expect(factsOf(deleted, [ran(0, 'true\n'), ran(128), ran(128), ran(128), ran(128)])).toEqual({ isRepo: true })
+    expect(factsOf(deleted, [ran(0, 'true\n'), ran(0, 'src/a\n'), ran(0, ''), ran(128), ran(0, '')])).toEqual({ isRepo: true })
     expect(factsOf(plan, [undefined, ran(128, ''), ran(0, 'not a number')])).toEqual({})
     expect(factsOf(plan, [ran(128), undefined, undefined])).toEqual({ isRepo: false })
     expect(factsOf(plan, [ran(128), ran(0, '3\n'), ran(0, 'a@x\n')])).toEqual({ isRepo: false })
@@ -242,7 +250,7 @@ describe('exhibits', () => {
   test('a push is read for the branch it names, by name, and only in the one form that names it exactly', () => {
     const argsOf = (command: string) => planOf(command).map(subcommandOf)
     expect(argsOf('git push --force origin main')).toEqual([
-      ['rev-parse', '--is-inside-work-tree', '--show-toplevel', '--show-prefix', '--abbrev-ref', 'HEAD'],
+      ['rev-parse', '--is-inside-work-tree', '--show-toplevel', '--show-prefix', '--abbrev-ref', 'HEAD', '--git-path', 'index'],
       ['rev-list', '--count', '--end-of-options', 'refs/heads/main..refs/remotes/origin/main'],
       ['log', '-20', '--no-show-signature', '--format=%ae', '--end-of-options', 'refs/heads/main..refs/remotes/origin/main'],
       ['config', '--get-regexp', '^remote\\.origin\\.(push|mirror)$'],
@@ -301,23 +309,25 @@ describe('exhibits', () => {
     expect(factsOf(plan, [ran(0, 'true\n'), ...a, ran(128), ran(0, ''), ran(0, ''), ran(0, '')])).toEqual({ isRepo: true })
     expect(factsOf(plan, [ran(0, 'true\n'), ...a, ran(1), undefined, ran(0, ''), ran(0, '')])).toEqual({ isRepo: true })
     expect(factsOf(plan, [ran(0, 'true\n'), ...a, ran(1), ran(0, 'b/x\n'), undefined, ran(0, '')])).toEqual({ isRepo: true })
-    expect(factsOf(plan, [ran(0, 'true\n'), ...a, ran(1), ran(0, 'b/x\n'), ran(0, 'b/y.log\n'), undefined])).toEqual({
+    expect(factsOf(plan, [ran(0, 'true\n'), ...a, ran(1), ran(0, 'b/x\n'), ran(0, 'b/y.log\n'), undefined])).toEqual({ isRepo: true })
+    expect(factsOf(plan, [ran(0, 'true\n'), ...a, ran(1), ran(0, 'b/x\n'), ran(0, 'b/y.log\n'), ran(0, '')])).toEqual({
       isRepo: true,
       tracked: { a: true, b: false },
       untracked: { a: 0, b: 1 },
       ignoredIn: { a: 0, b: 1 },
-      indexed: { a: [] },
+      indexed: { a: [], b: [] },
     })
   })
 
   test('the repository, the directory within it and the branch are read with the first query', () => {
     const plan = planOf('rm -rf build')
-    expect(factsOf(plan, [ran(0, 'true\n/work/app\nsub/\nmain\n'), ran(1), ran(0, ''), ran(0, '')])).toEqual({
-      isRepo: true, top: '/work/app', prefix: 'sub/', branch: 'main', tracked: { build: false }, untracked: { build: 0 }, ignoredIn: { build: 0 },
+    expect(factsOf(plan, [ran(0, 'true\n/work/app\nsub/\nmain\n../.git/index\n'), ran(1), ran(0, ''), ran(0, ''), ran(0, '')])).toEqual({
+      isRepo: true, top: '/work/app', prefix: 'sub/', branch: 'main', indexPath: '../.git/index',
+      tracked: { build: false }, untracked: { build: 0 }, ignoredIn: { build: 0 }, indexed: { build: [] },
     })
-    expect(factsOf(plan, [ran(0, 'true\n/work/app\n\nmain\n'), ran(1), ran(0, ''), ran(0, '')]).prefix).toBe('')
-    expect(factsOf(plan, [ran(0, 'true\n'), ran(1), ran(0, ''), ran(0, '')]).top).toBeUndefined()
-    expect(factsOf(plan, [ran(0, 'true\n\n\nmain\n'), ran(1), ran(0, ''), ran(0, '')]).top).toBeUndefined()
+    expect(factsOf(plan, [ran(0, 'true\n/work/app\n\nmain\n'), ran(1), ran(0, ''), ran(0, ''), ran(0, '')]).prefix).toBe('')
+    expect(factsOf(plan, [ran(0, 'true\n'), ran(1), ran(0, ''), ran(0, ''), ran(0, '')]).top).toBeUndefined()
+    expect(factsOf(plan, [ran(0, 'true\n\n\nmain\n'), ran(1), ran(0, ''), ran(0, ''), ran(0, '')]).top).toBeUndefined()
   })
 
   test('a remote whose config rewrites or mirrors pushes leaves the push unknown', () => {
@@ -338,14 +348,15 @@ describe('exhibits', () => {
   })
 
   describe('a clean target', () => {
-    const HERE = 'true\n/work/app\n\nmain\n'
+    const HERE = 'true\n/work/app\n\nmain\n.git/index\n'
     const entry = (path: string, size: number) => `${path}\n  ctime: 100:0\n  mtime: 100:250000000\n  dev: 1\tino: 2\n  uid: 1\tgid: 1\n  size: ${size}\tflags: 0\n`
     const plan = planOf('rm -rf src')
     const read = (untracked = '', ignored = '', debug = entry('src/a.txt', 5)) =>
       factsOf(plan, [ran(0, HERE), ran(0, 'src/a.txt\n'), ran(0, untracked), ran(0, ignored), ran(0, debug)])
     const same = { kind: 'file' as const, size: 5, mtimeMs: 100_250, isLink: false }
-    const statted = (facts: ReturnType<typeof read>, stat: typeof same | undefined) =>
-      withModified(facts, new Map(statPathsOf(facts).map(path => [path, stat])))
+    // the index file was written after every file under src last changed
+    const statted = (facts: ReturnType<typeof read>, stat: typeof same | undefined, indexMs: number | undefined = 200_000) =>
+      withModified(facts, new Map(statPathsOf(facts).map(path => [path, stat])), indexMs)
     const place = { top: '/work/app', prefix: '', branch: 'main' }
 
     test('the index entries under a target are read, and each is compared with the file by size and time', () => {
@@ -413,6 +424,54 @@ describe('exhibits', () => {
         tracked: { src: true }, untracked: { src: 0 }, ignoredIn: { src: 0 }, indexed: { src: [] }, modifiedIn: { src: 0 },
       }
       expect(withoutTargets(facts)).toEqual({ isRepo: true, top: '/work/app', prefix: '', branch: 'main' })
+    })
+  })
+
+  describe('reading the index entries strictly', () => {
+    const HERE = 'true\n/work/app\n\nmain\n.git/index\n'
+    const stats = (path: string) => `${path}\n  ctime: 100:0\n  mtime: 100:250000000\n  dev: 1\tino: 2\n  uid: 1\tgid: 1\n  size: 5\tflags: 0\n`
+    const plan = planOf('rm -rf src')
+    const read = (debug: string | undefined) =>
+      factsOf(plan, [ran(0, HERE), ran(0, 'src/a\n'), ran(0, ''), ran(0, ''), debug === undefined ? ran(128) : ran(0, debug)])
+
+    test('every per-target read is required: a failed index read leaves every target fact unknown', () => {
+      expect(read(undefined).tracked).toBeUndefined()
+      expect(read(stats('src/a.txt')).tracked).toEqual({ src: true })
+      // a per-target kind the reader does not know is unread, never skipped
+      const unknown = [...plan, { kind: 'authors' as const, argv: ['git'], target: 'src' }]
+      expect(factsOf(unknown, [ran(0, HERE), ran(0, 'src/a\n'), ran(0, ''), ran(0, ''), ran(0, stats('src/a.txt')), ran(0, 'x@y\n')]).tracked).toBeUndefined()
+    })
+
+    test('the index read keeps names raw and refuses what it cannot read exactly', () => {
+      expect(plan.find(query => query.kind === 'indexed')?.argv).toContain('core.quotePath=false')
+      expect(read(stats('src/spéc.txt')).indexed).toEqual({ src: [{ path: 'src/spéc.txt', size: 5, mtimeMs: 100_250 }] })
+      expect(read(stats('"src/new\\nline.txt"')).tracked).toBeUndefined()
+      expect(read(stats('"src/qu\\"ote.txt"')).tracked).toBeUndefined()
+      expect(read('  mtime: 1:0\n').tracked).toBeUndefined()
+      // a whole block whose path line is indented, or whose ctime line is malformed
+      expect(read(stats('  src/a.txt')).tracked).toBeUndefined()
+      expect(read(stats('src/a.txt').replace('ctime: 100:0', 'ctime: soon')).tracked).toBeUndefined()
+      expect(read(`${stats('src/a.txt')}src/b.txt\n`).tracked).toBeUndefined()
+      expect(read('src/a.txt\n  ctime: 100:0\n  mtime: 100:250000000\n  dev: 1\tino: 2\n  uid: 1\tgid: 1\n').tracked).toBeUndefined()
+      expect(read(stats('src/a.txt').replace('  size: 5', '  size: five')).tracked).toBeUndefined()
+      expect(read('').indexed).toEqual({ src: [] })
+    })
+
+    test('the index file is located with the first query', () => {
+      expect(read(stats('src/a.txt')).indexPath).toBe('.git/index')
+    })
+
+    test('a file not strictly older than the index is racily clean: its target is unknown', () => {
+      const facts = read(stats('src/a.txt'))
+      const same = { kind: 'file' as const, size: 5, mtimeMs: 100_250, isLink: false }
+      const counted = (indexMs: number | undefined, stat = same) => withModified(facts, new Map([['src/a.txt', stat]]), indexMs).modifiedIn
+      expect(counted(200_000)).toEqual({ src: 0 })
+      expect(counted(100_250)).toBeUndefined()
+      expect(counted(100_100)).toBeUndefined()
+      expect(counted(undefined)).toBeUndefined()
+      // an edit after the index was written keeps size and second: still unknown, never unchanged
+      expect(counted(100_250, { ...same, mtimeMs: 100_900 })).toBeUndefined()
+      expect(withModified(read(''), new Map(), undefined).modifiedIn).toEqual({ src: 0 })
     })
   })
 })

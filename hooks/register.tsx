@@ -163,14 +163,16 @@ const factsFrom = async ($: EngineInterface, command: string): Promise<Facts> =>
   // each indexed file against the index, within the same bound; a file
   // that will not stat, or a bound that runs out, leaves the change unknown
   const paths = statPathsOf(facts)
+  const index = facts.indexPath
   const stats = await Promise.race([
-    Promise.all(paths.map(path => $.fs.stat(path).catch(() => undefined))).then(
-      all => new Map(paths.map((path, at) => [path, all[at]])),
-    ),
+    Promise.all([
+      index === undefined ? undefined : $.fs.stat(index).catch(() => undefined),
+      ...paths.map(path => $.fs.stat(path).catch(() => undefined)),
+    ]).then(([indexStat, ...all]) => ({ indexMs: indexStat?.mtimeMs, byPath: new Map(paths.map((path, at) => [path, all[at]])) })),
     bound.then(() => undefined),
   ])
   timer.abort()
-  return stats === undefined ? facts : withModified(facts, stats)
+  return stats === undefined ? facts : withModified(facts, stats.byPath, stats.indexMs)
 }
 
 /**
