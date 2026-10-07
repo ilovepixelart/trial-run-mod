@@ -375,6 +375,11 @@ export const register: Register = on => {
   on('command.run', { command: 'court' }, async ($, e) => {
     const [verb = '', ...rest] = e.args.trim().split(/\s+/)
     if (verb === 'appeal') {
+      // the defendant must not appeal its own conviction: only the person's
+      // own Enter at the terminal files one, every other origin is refused
+      if (e.origin.kind !== 'composer') {
+        return { text: 'Only the person can file an appeal.' }
+      }
       return { text: await appealWith($, memory, rest.join(' ')) }
     }
     if (e.args.trim() === 'docket') {

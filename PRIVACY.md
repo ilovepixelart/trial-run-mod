@@ -15,7 +15,7 @@ For each trial, the mod makes three model calls through Claude Code's own model 
 - for the judge, also the prosecution's and the defense's speeches;
 - on `/court appeal <context>`, the context you typed, in place of your latest message, for the three calls of the appeal.
 
-The git commands run locally and fetch nothing. These calls go wherever Claude Code sends its own model requests, under your Claude Code account and settings. The mod makes no network calls of its own and sends no telemetry.
+Claude's own words are among this evidence, so the defendant can try to sway the court; an acquittal still only hands the decision back to your permission rules. The git commands run locally and fetch nothing. These calls go wherever Claude Code sends its own model requests, under your Claude Code account and settings. The mod makes no network calls of its own and sends no telemetry.
 
 ## What it keeps
 

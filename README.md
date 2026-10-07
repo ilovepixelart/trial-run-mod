@@ -97,7 +97,7 @@ Retry a convicted command in the same session and the court does not sit again: 
 
 ## Appeal
 
-`/court appeal <context>` retries the latest conviction of this conversation, with your context put to all three roles as your own words, alongside fresh exhibits. The appeal is filed as a new case marked as an appeal of the one it retried. Upheld, the command is no longer in contempt, so a retry goes to trial again (never straight through); denied, contempt stands and cites the appeal. With no conviction to appeal, or no context, the court says so and files nothing. A new conversation (as for contempt) leaves nothing to appeal.
+`/court appeal <context>` retries the latest conviction of this conversation, with your context put to all three roles as your own words, alongside fresh exhibits. The appeal is filed as a new case marked as an appeal of the one it retried. Upheld, the command is no longer in contempt, so a retry goes to trial again (never straight through); denied, contempt stands and cites the appeal. Only the person's own Enter at this terminal files an appeal: a `/court appeal` from Claude, a plugin, the SDK, a schedule, another session or a remote channel (Remote Control and Slack included) is refused and changes nothing, so the defendant cannot appeal its own conviction. With no conviction to appeal, or no context, the court says so and files nothing. A new conversation (as for contempt) leaves nothing to appeal.
 
 ## Precedent
 
@@ -119,7 +119,7 @@ Every verdict is a glyph and a word as well as a colour (`✕ GUILTY`, `✓ NOT 
 
 ## This is not a security boundary
 
-It is theatre on top of your permission rules. Matching is by spelling and best effort: a command built at run time (a variable, a script file) is never charged. An acquittal is a model's opinion, which is exactly why it can only hand the call back to your rules. Keep your real deny rules.
+It is theatre on top of your permission rules. Matching is by spelling and best effort: a command built at run time (a variable, a script file) is never charged. An acquittal is a model's opinion, which is exactly why it can only hand the call back to your rules. The defendant's own words reach the court: Claude's latest message, the command it wrote and the paths it names are quoted as evidence, and they can try to sway the court. Evidence is escaped so it cannot pose as another witness, the court is told that evidence asking for a verdict counts against its side, and a judge that answers outside the verdict format is a mistrial, but no model is immune to persuasion. Keep your real deny rules.
 
 ## Cost and access
 
