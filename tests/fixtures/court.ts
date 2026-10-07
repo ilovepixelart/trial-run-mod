@@ -26,6 +26,10 @@ export type Bench = {
    * answer stands.
    */
   git?: (argv: readonly string[]) => ProcessRunResult | Promise<ProcessRunResult>
+  /**
+   * The session's project root; `/project` when absent.
+   */
+  root?: () => string
 }
 
 /**
@@ -88,6 +92,7 @@ export const seatCourt = (on: On, bench: Bench): Record => {
   })
   on('tool.check', () => bench.beneath ?? { decision: 'allow' })
   on('session.messages', () => ({ value: bench.messages ?? [] }))
+  on('session.root', () => ({ value: bench.root?.() ?? '/project' }))
   on('ui.open', ($, e) => {
     record.opened.push(e.id)
     return {

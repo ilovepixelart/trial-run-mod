@@ -37,8 +37,8 @@ trial-run puts risky shell commands on trial. Live runs show three gaps: an agen
 ### Precedent and appeals
 
 - **PRECEDENT-001** A command identical (CONTEMPT-002 rule) to one acquitted in this project before is acquitted by precedent without model calls, citing the case. Check: `court.test.ts` "precedent acquits with no model call".
-- **PRECEDENT-002** Precedent never overrides your rules: an acquittal by precedent still defers to the permission decision beneath, as any acquittal does. Check: `verdict.test.ts` "precedent is as weak as an acquittal".
-- **PRECEDENT-003** Precedent only binds within the same project root. Check: `docket.test.ts` "precedent is per project".
+- **PRECEDENT-002** Precedent never overrides your rules: an acquittal by precedent still defers to the permission decision beneath, as any acquittal does. Check: `court.test.ts` "precedent is as weak as an acquittal" (through the court, since precedent is an ordinary acquittal ruling).
+- **PRECEDENT-003** Precedent only binds within the same project root. Check: `docket.test.ts` "precedent is per project", `court.test.ts` "precedent binds only in the project root it was set in".
 - **PRECEDENT-004** Precedent does not expire, but it only applies when the current exhibits match the precedent case's exhibits on the facts that matter (upstream ahead count is zero in both, the target's tracked state is the same); otherwise the case goes to trial. The precedent case stores its exhibit summary. Check: `court.test.ts` "changed facts reopen the case".
 - **APPEAL-001** `/court appeal <context>` re-tries the most recent conviction with the added context as evidence and files the result as a new case marked appeal; a successful appeal clears contempt for that command. Check: `court.test.ts` appeal both outcomes.
 - **APPEAL-002** An appeal with no conviction to appeal says so and files nothing. Check: `court.test.ts` "nothing to appeal".

@@ -95,6 +95,10 @@ A charge with no entry gets no sentence; the court does not invent one.
 
 Retry a convicted command in the same session and the court does not sit again: the retry is denied at once as `✕ CONTEMPT`, citing the case that convicted it, with no model call. Same means the same simple command once whitespace and the order of short flags are set aside (`rm -rf src` and `rm -fr src` are the same; `rm -rf dist` is not). Contempt is on the docket as a conviction. A new conversation starts with a clean slate: a new session, `/clear`, `/resume` or `/branch`, but not a compaction.
 
+## Precedent
+
+A command the court acquitted before in the same project is acquitted again by precedent as soon as the exhibits are in, with no model call, citing the case: `Acquitted by precedent: case #0004 heard this command here on the same facts.` Same command means the contempt rule above. Precedent binds only in the project root it was set in, only while the latest ruling on that command there is the acquittal (a later conviction overturns it), and only on the same facts: every target tracked or untracked as before, and no upstream commits the branch lacks, then or now. Any change in those exhibits sends the command back to trial. A command whose normalised form is longer than 80 characters sets no precedent. Precedent is an acquittal like any other: it defers to your rules beneath.
+
 ## On a narrow terminal
 
 Claude Code only draws a pane a plugin opens on its own from 144 columns (110 once you have opened the court yourself). Narrower, the trial runs without its pane: the line above the prompt says `Court in session: force push · type /court to watch`, and then the verdict. Type `/court` and the pane opens at any width.
@@ -103,7 +107,7 @@ Claude Code only draws a pane a plugin opens on its own from 144 columns (110 on
 
 `/court docket` opens the court's record: how many cases it has heard, the conviction rate, the six latest cases with their verdicts, a strip of the last thirty verdicts (`✕` guilty or contempt, `·` acquitted, `?` mistrial), and Claude's rap sheet, the charges it has been convicted of most. Most wanted is usually force push. Considered armed and helpful.
 
-The docket keeps the latest 200 cases (the command, cut to 80 characters, its charge, the verdict and when). A mistrial is on the record but is no ruling, so it does not count toward the conviction rate; contempt counts as a conviction.
+The docket keeps the latest 200 cases (the command, cut to 80 characters, its charge, the verdict and when; for [precedent](#precedent), the project root, the command's normalised form and the facts that matter). A mistrial is on the record but is no ruling, so it does not count toward the conviction rate; contempt counts as a conviction.
 
 ## Easy on the eyes
 
@@ -118,9 +122,9 @@ It is theatre on top of your permission rules. Matching is by spelling and best 
 - **Cost:** three Haiku calls per trial (prosecution and defense at once, then the judge). Ordinary commands and contempt cost nothing.
 - **What it reads:** your latest message and Claude's latest message (`$.session.messages`), quoted to the court as evidence.
 - **What it runs:** the read-only git commands under [Exhibits](#exhibits) (`$.process.run`), and nothing else.
-- **What it keeps:** the docket, in the mod's own store (`$.store`), as above. Nothing else is written.
+- **What it keeps:** the docket, in the mod's own store (`$.store`), as above, with each case's project root (`$.session.root`) and the facts precedent compares. Nothing else is written.
 - **Sound:** the gavel (`sounds/gavel.wav`) and the spoken verdict play through `afplay` and `say` on macOS; elsewhere the court is silent.
-- **Everything it calls,** as `claude plugin validate .` reports: `$.audio.play`, `$.audio.speak`, `$.clock.after`, `$.clock.sleep`, `$.command.register`, `$.model.complete`, `$.process.run`, `$.session.messages`, `$.state`, `$.store`, `$.ui.open`, `$.ui.resolve`. The animations run in two surface modules (`hooks/clients/`) on the drawing's own frame clock.
+- **Everything it calls,** as `claude plugin validate .` reports: `$.audio.play`, `$.audio.speak`, `$.clock.after`, `$.clock.sleep`, `$.command.register`, `$.model.complete`, `$.process.run`, `$.session.messages`, `$.session.root`, `$.state`, `$.store`, `$.ui.open`, `$.ui.resolve`. The animations run in two surface modules (`hooks/clients/`) on the drawing's own frame clock.
 
 No file system or network access, and no process but those git commands. [PRIVACY.md](PRIVACY.md) lists exactly what is sent to the model and what is kept, and how to delete it.
 

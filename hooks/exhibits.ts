@@ -252,3 +252,14 @@ export const materialFactsOf = (facts: Facts): MaterialFacts => ({
   ...(facts.behind === undefined ? {} : { behind: facts.behind }),
   ...(facts.tracked === undefined ? {} : { tracked: facts.tracked }),
 })
+
+const trackedOf = (facts: MaterialFacts) =>
+  JSON.stringify(Object.entries(facts.tracked ?? {}).toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+
+/**
+ * Whether the facts that matter are the same then and now: no upstream
+ * commits this branch lacks in either, and every target tracked or not
+ * as before.
+ */
+export const isSameMaterial = (then: MaterialFacts, now: MaterialFacts): boolean =>
+  then.behind === now.behind && (now.behind === undefined || now.behind === 0) && trackedOf(then) === trackedOf(now)

@@ -18,7 +18,7 @@ The git commands run locally and fetch nothing. These calls go wherever Claude C
 
 ## What it keeps
 
-In Claude Code's plugin store on this machine (`$.store`), one record per case: the case number, the charged command cut to 80 characters, the charge, the verdict and the time. At most the newest 200 cases are kept, plus the docket's layout version.
+In Claude Code's plugin store on this machine (`$.store`), one record per case: the case number, the charged command cut to 80 characters, the charge, the verdict and the time. For precedent, also the session's project root path, the command's normalised form (only when 80 characters or fewer), whether each deleted path was tracked, the count of upstream commits the branch lacked, and the case an acquittal by precedent cites. At most the newest 200 cases are kept, plus the docket's layout version.
 
 Nothing else is written. Sounds (the gavel and the spoken verdict) play locally.
 

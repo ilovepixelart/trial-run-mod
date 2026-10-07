@@ -13,7 +13,8 @@ All notable changes to trial-run. Versions follow [Semantic Versioning](https://
 - Contempt of court: retrying a convicted command in the same conversation is denied with no trial and no model call. A new session, `/clear`, `/resume` and `/branch` forgive it; a compaction does not.
 - `/court` (the last trial) and `/court docket` (conviction rate, recent cases, verdict strip, rap sheet).
 - Object (`o`) and Skip (`s`) during the deliberation; a skipped trial is filed as waived.
-- The saved docket records its layout (1); a docket saved by a newer version is never read or overwritten.
+- Precedent: a command acquitted before in the same project root, whose latest ruling there is that acquittal, is acquitted again with no model call, citing the case, while the facts that matter (tracked targets, upstream commits the branch lacks) are unchanged. It defers to your rules beneath like any acquittal.
+- The saved docket records its layout (2: each case also keeps its project root, normalised command and material facts). A layout 1 docket is read as it is and its cases set no precedent; a docket saved by a newer version is never read or overwritten.
 - Requires Claude Code 2.1.287 or later.
 
 ### Known limitations

@@ -3,8 +3,8 @@ import type { EngineInterface, Register, ResultOf } from 'claude-code'
 
 import type { CourtRole, CourtTrial, CourtVerdict } from '../types'
 import { contemptKeyOf } from './contempt'
-import { DOCKET_LAYOUT, casesOf, docketOf, fileCase, isReadableLayout, nextCaseNumber, priorsOf } from './docket'
-import { GIT_ENV, exhibitLinesOf, factsOf, planOf } from './exhibits'
+import { DOCKET_LAYOUT, casesOf, docketOf, fileCase, isReadableLayout, nextCaseNumber, precedentOf, priorsOf } from './docket'
+import { GIT_ENV, exhibitLinesOf, factsOf, materialFactsOf, planOf } from './exhibits'
 import type { ExhibitResult, Facts } from './exhibits'
 import type { CaseRecord } from './docket'
 import { gaugeOf } from './gauge'
@@ -150,6 +150,18 @@ const factsFrom = async ($: EngineInterface, command: string): Promise<Facts> =>
   )
   timer.abort()
   return factsOf(plan, results)
+}
+
+/**
+ * The session's project root, where precedent binds; undefined when the
+ * session will not say, and then no precedent is set or followed.
+ */
+const rootFrom = async ($: EngineInterface): Promise<string | undefined> => {
+  try {
+    return await $.session.root()
+  } catch {
+    return undefined
+  }
 }
 
 const quietly = (work: Promise<unknown>) => {
@@ -414,15 +426,28 @@ export const register: Register = on => {
     const timer = new AbortController()
     const never = new Promise<Ruling>(() => undefined)
 
+    // what the docket keeps for precedent, once the exhibits are in
+    let filed: Pick<CaseRecord, 'root' | 'key' | 'facts' | 'precedent'> = { key: contemptKey }
     const exhibitsFrom = async () => {
-      const exhibits = exhibitLinesOf(await factsFrom($, command))
+      const facts = await factsFrom($, command)
+      const exhibits = exhibitLinesOf(facts)
       await update($, trialAtom, trial => (trial?.id === id ? { ...trial, exhibits } : trial))
-      return exhibits
+      return { exhibits, facts: materialFactsOf(facts) }
+    }
+    const heard = async (): Promise<Ruling> => {
+      const [testimony, { exhibits, facts }, root] = await Promise.all([testimonyFrom($), exhibitsFrom(), rootFrom($)])
+      filed = { ...filed, root, facts }
+      const bound = root === undefined ? undefined : precedentOf(history, { key: contemptKey, root, facts })
+      if (bound !== undefined) {
+        // acquitted here before on the same facts: no model call
+        filed = { ...filed, precedent: bound.number }
+        return { kind: 'acquitted', reason: `acquitted by precedent: case ${caseNumberOf(bound.number)} heard this command here on the same facts` }
+      }
+      return tryCase({ command, charge, ...testimony, exhibits }, speak, onSpeech)
     }
 
     const ruling = await Promise.race<Ruling>([
-      Promise.all([testimonyFrom($), exhibitsFrom()])
-        .then(([testimony, exhibits]) => tryCase({ command, charge, ...testimony, exhibits }, speak, onSpeech))
+      heard()
         .catch(() => ({ kind: 'hung', reason: 'the court fell into disorder' })),
       $.clock
         .sleep(DEADLINE_MS, { signal: timer.signal })
@@ -461,7 +486,7 @@ export const register: Register = on => {
         })
       })
     })
-    await fileOnDocket($, { command: charge.command, charge: charge.label, verdict: ruling.kind, at: Date.now() })
+    await fileOnDocket($, { command: charge.command, charge: charge.label, verdict: ruling.kind, at: Date.now(), ...filed })
     quietly($.audio.play({ asset: GAVEL_SOUND }))
     quietly($.audio.speak(SPOKEN[ruling.kind]))
     return sentence

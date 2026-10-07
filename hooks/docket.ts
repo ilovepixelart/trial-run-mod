@@ -1,3 +1,6 @@
+import { isSameMaterial } from './exhibits'
+import type { MaterialFacts } from './exhibits'
+
 /**
  * One case the court has heard, as the docket keeps it.
  */
@@ -10,6 +13,18 @@ export type CaseRecord = {
    * When the court ruled, in milliseconds since the epoch.
    */
   at: number
+  /**
+   * Since layout 2: the project root the case was heard in, the command's
+   * contempt key (absent when too long to keep whole) and the facts that
+   * matter for precedent. A case filed before has none and sets no precedent.
+   */
+  root?: string
+  key?: string
+  facts?: MaterialFacts
+  /**
+   * The case an acquittal by precedent cites.
+   */
+  precedent?: number
 }
 
 export type RapSheetLine = { charge: string; count: number }
@@ -36,12 +51,13 @@ export type Docket = {
  * The layout of the saved docket this version writes, saved beside the
  * cases. Bump it when a saved field changes meaning.
  */
-export const DOCKET_LAYOUT = 1
+export const DOCKET_LAYOUT = 2
 
 /**
  * Whether this version can read a docket saved under a layout: one saved
- * before layouts were recorded, or this layout. A newer layout is left
- * untouched, never read and never overwritten.
+ * before layouts were recorded, an older layout (layout 1 cases read as
+ * they are, without the fields layout 2 added), or this layout. A newer
+ * layout is left untouched, never read and never overwritten.
  */
 export const isReadableLayout = (stored: unknown): boolean =>
   stored === undefined || stored === null || (typeof stored === 'number' && stored <= DOCKET_LAYOUT)
@@ -64,7 +80,13 @@ const RAP_SHEET = 3
  */
 export const fileCase = (history: readonly CaseRecord[], filing: Omit<CaseRecord, 'number'>): CaseRecord[] => {
   const number = (history.at(-1)?.number ?? 0) + 1
-  const filed = { ...filing, number, command: filing.command.slice(0, COMMAND_CHARS) }
+  const { key, ...rest } = filing
+  const filed = {
+    ...rest,
+    number,
+    command: filing.command.slice(0, COMMAND_CHARS),
+    ...(key !== undefined && key.length <= COMMAND_CHARS ? { key } : {}),
+  }
   return [...history, filed].slice(-DOCKET_CAP)
 }
 
@@ -77,6 +99,24 @@ export const nextCaseNumber = (history: readonly CaseRecord[]): number => (histo
  * A guilty verdict, or contempt: a convicted command retried.
  */
 const isConviction = (c: CaseRecord) => c.verdict === 'guilty' || c.verdict === 'contempt'
+
+/**
+ * The acquittal that binds a command as precedent: the latest ruling
+ * (guilty, acquitted or contempt) on the same command in the same project
+ * root, when it acquitted on the same facts that matter.
+ *
+ * @param history the cases so far, oldest first
+ * @param sought the command's contempt key, the project root and the facts now
+ */
+export const precedentOf = (
+  history: readonly CaseRecord[],
+  sought: { key: string; root: string; facts: MaterialFacts },
+): CaseRecord | undefined => {
+  const last = history.findLast(
+    c => c.root === sought.root && c.key === sought.key && (c.verdict === 'acquitted' || isConviction(c)),
+  )
+  return last?.verdict === 'acquitted' && isSameMaterial(last.facts ?? {}, sought.facts) ? last : undefined
+}
 
 /**
  * Prior convictions on one charge.
