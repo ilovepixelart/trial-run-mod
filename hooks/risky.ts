@@ -118,9 +118,9 @@ const RUNNERS = new Set(['su', 'sg', 'script'])
 
 /**
  * Reserved words that lead a simple command inside a compound one
- * (`if x; then rm ...`, `{ rm ...; }`, `! rm ...`).
+ * (`if x; then rm ...`, `{ rm ...; }`, `! rm ...`, `coproc rm ...`).
  */
-const KEYWORDS = new Set(['!', '{', 'if', 'then', 'else', 'elif', 'while', 'until', 'do'])
+const KEYWORDS = new Set(['!', '{', 'if', 'then', 'else', 'elif', 'while', 'until', 'do', 'coproc'])
 
 /**
  * Every program a charge names: a command name the shell only resolves at
@@ -330,13 +330,17 @@ const quotedAt = (line: string, at: number, scripts: string[]): (Word & { end: n
 
 /**
  * The words of one segment as the shell reads them, with redirections and
- * their targets left out, and the commands its substitutions run. A quote
+ * their targets left out, the commands its substitutions run, and where a
+ * `(` or `)` opens or ends a group or a case pattern (`(x)`, `x)`, `f()`),
+ * as the count of words before it: the words after start a command of
+ * their own. A quote
  * left dangling by a separator split inside quotes (`bash -c 'cd app` and
  * `git reset --hard'`) is dropped, so the halves still match a charge.
  */
-const lexOf = (line: string): { words: Word[]; scripts: string[] } => {
+const lexOf = (line: string): { words: Word[]; scripts: string[]; breaks: number[] } => {
   const words: Word[] = []
   const scripts: string[] = []
+  const breaks: number[] = []
   let word: Word | undefined
   let target = false
   const end = () => {
@@ -361,6 +365,7 @@ const lexOf = (line: string): { words: Word[]; scripts: string[] } => {
       at += redirection.length
     } else if (/[\s()&]/.test(char)) {
       end()
+      if (char === '(' || char === ')') breaks.push(words.length)
       at += 1
     } else if (char === '\\') {
       add(line[at + 1] ?? '', true)
@@ -371,7 +376,7 @@ const lexOf = (line: string): { words: Word[]; scripts: string[] } => {
     }
   }
   end()
-  return { words, scripts }
+  return { words, scripts, breaks }
 }
 
 /**
@@ -500,7 +505,10 @@ const commandStartOf = (words: readonly Word[]): { at: number; script?: string }
     if (script !== undefined) {
       return { at, script }
     }
-    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(word.text) || (word.exact && KEYWORDS.has(word.text))) {
+    if (word.exact && (word.text === 'function' || (word.text === 'coproc' && words[at + 2]?.text === '{'))) {
+      // a function's or a named coproc's name
+      at += 2
+    } else if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(word.text) || (word.exact && KEYWORDS.has(word.text))) {
       at += 1
     } else if (program !== undefined && WRAPPERS.has(program)) {
       wrapper = program
@@ -527,15 +535,24 @@ const commandStartOf = (words: readonly Word[]): { at: number; script?: string }
 const commandsOf = (segment: string, depth = 0): Simple[] => {
   const nested = (script: string) =>
     depth < 3 ? segmentsOf(script).flatMap(part => commandsOf(part, depth + 1)) : []
-  const { words, scripts } = lexOf(segment.trim())
+  const { words, scripts, breaks } = lexOf(segment.trim())
+  const ends = [...breaks, words.length]
+  const groups = [0, ...breaks].map((from, index) => words.slice(from, ends[index]))
+  return [...groups.flatMap(group => simpleOf(group, segment, nested)), ...scripts.flatMap(nested)]
+}
+
+/**
+ * The simple command of one group of words, or the commands of the script
+ * it runs.
+ */
+const simpleOf = (words: readonly Word[], segment: string, nested: (script: string) => Simple[]): Simple[] => {
   const start = commandStartOf(words)
   const [head, ...args] = words.slice(start.at)
   const program = head === undefined ? undefined : programOf(head)
   const rest = head === undefined ? [] : [program ?? head.text, ...args.map(word => word.text)]
   const inner = start.script ?? innerScriptOf(rest)
   const open = head !== undefined && program === undefined
-  const own: Simple[] = inner === undefined ? [{ words: rest, open, text: spellingOf(segment) }] : nested(inner)
-  return [...own, ...scripts.flatMap(nested)]
+  return inner === undefined ? [{ words: rest, open, text: spellingOf(segment) }] : nested(inner)
 }
 
 /**
@@ -607,7 +624,7 @@ const PLAIN_LINE = /^[A-Za-z0-9_@%+=:,./~ -]+$/
  */
 const TILDE = /(^|[ =:])~/
 
-const NOT_SIMPLE_HEADS = new Set([...WRAPPERS, ...SHELLS, ...RUNNERS, 'eval', 'source', '.'])
+const NOT_SIMPLE_HEADS = new Set([...WRAPPERS, ...SHELLS, ...RUNNERS, 'eval', 'source', '.', 'coproc'])
 
 /**
  * Whether a whole command line is one simple command of plain words: no

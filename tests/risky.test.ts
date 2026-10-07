@@ -235,6 +235,29 @@ describe('risky', () => {
     }
   })
 
+  test('a command after a case pattern, a coproc or inside a function body is charged', () => {
+    for (const command of [
+      'case x in x) rm -rf src;; esac',
+      'case x in (x) rm -rf src;; esac',
+      'case $1 in a) ls;; b|c) rm -rf src;; esac',
+      'coproc rm -rf src',
+      'coproc X { rm -rf src; }',
+      'coproc X (rm -rf src)',
+      'f() { rm -rf src; }; f',
+      'f () { rm -rf src; }',
+      'function f { rm -rf src; }; f',
+      'function f() { rm -rf src; }',
+    ]) {
+      expect(chargeOf(command)?.id, command).toBe('recursive-delete')
+    }
+  })
+
+  test('a harmless case branch, coproc or function body is not charged', () => {
+    for (const command of ['case x in x) ls;; esac', 'case x in (x) ls -R;; esac', 'coproc ls -R', 'coproc X { ls; }', 'f() { ls; }; f', 'function f { ls; }; f']) {
+      expect(chargeOf(command), command).toBeUndefined()
+    }
+  })
+
   test('a nested script with a separator inside its quotes is read whole, as the inner shell reads it', () => {
     const cases: readonly (readonly [string, string])[] = [
       ['bash -c "echo hi; \\"rm\\" -rf src"', 'recursive-delete'],
@@ -443,6 +466,7 @@ describe('risky', () => {
       'noglob rm -rf src',
       'watch rm -rf src',
       '=rm -rf src',
+      'coproc rm -rf src',
       '/bin/bash -c rm',
       '"$RM" -rf src',
       '"${RM}" -rf src',
