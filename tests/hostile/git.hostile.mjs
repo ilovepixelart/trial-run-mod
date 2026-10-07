@@ -308,3 +308,42 @@ test('a target spelled as pathspec magic is read as the path rm deletes', () => 
     { kind: 'untracked', status: 0, stdout: '' },
   ])
 })
+
+/**
+ * The upstream count a force push of main to origin is entered with in
+ * `repo`, read by the court's own plan, argv and environment.
+ */
+const behindOf = repo => {
+  const plan = planOf('git push --force origin main')
+  const results = plan.map(query => {
+    const ran = spawnSync(query.argv[0], query.argv.slice(1), {
+      cwd: repo,
+      env: { ...process.env, ...GIT_ENV },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      encoding: 'utf8',
+      timeout: 10_000,
+    })
+    return { exitCode: ran.status ?? -1, stdout: ran.stdout }
+  })
+  return factsOf(plan, results).behind
+}
+
+test('a push url or push rewrite in the repository config leaves the push undescribed', () => {
+  const remote = join(root, 'pushurl-origin.git')
+  const repo = join(root, 'pushurl')
+  git(root, 'init', '-q', '--bare', '-b', 'main', remote)
+  git(root, 'clone', '-q', remote, repo)
+  git(repo, 'switch', '-q', '-c', 'main')
+  git(repo, '-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-q', '--allow-empty', '-m', 'one')
+  git(repo, 'push', '-q', '-u', 'origin', 'main')
+
+  // control: a plain remote is described
+  assert.equal(behindOf(repo), 0)
+
+  git(repo, 'config', 'remote.origin.pushurl', join(root, 'elsewhere.git'))
+  assert.equal(behindOf(repo), undefined)
+  git(repo, 'config', '--unset', 'remote.origin.pushurl')
+
+  git(repo, 'config', `url.${join(root, 'elsewhere.git')}.pushInsteadOf`, remote)
+  assert.equal(behindOf(repo), undefined)
+})

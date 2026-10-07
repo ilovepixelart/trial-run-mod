@@ -177,8 +177,12 @@ const pushPlanOf = (words: readonly string[]): ExhibitQuery[] => {
     INSIDE,
     query('behind', git('rev-list', '--count', '--end-of-options', range)),
     query('authors', git('log', '-20', '--no-show-signature', '--format=%ae', '--end-of-options', range)),
-    // a remote's push or mirror config changes what `push origin main` sends
-    query('pushconfig', git('config', '--get-regexp', `^remote\\.${remote.replaceAll('.', '\\.')}\\.(push|mirror)$`)),
+    // a remote's push, push url or mirror config, or any push rewrite of a
+    // URL, changes what `push origin main` sends or where it goes
+    query(
+      'pushconfig',
+      git('config', '--get-regexp', `^(remote\\.${remote.replaceAll('.', '\\.')}\\.(push|pushurl|mirror)|url\\..*\\.pushinsteadof)$`),
+    ),
   ]
 }
 

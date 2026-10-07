@@ -28,7 +28,7 @@ const ALLOWED = [
 const RANGE = /^refs\/heads\/[A-Za-z0-9._\/-]+\.\.refs\/remotes\/[A-Za-z0-9._\/-]+$/
 
 const isPushConfigQuery = (args: readonly string[]) =>
-  args.length === 3 && args[0] === 'config' && args[1] === '--get-regexp' && /^\^remote\\\.[A-Za-z0-9_\\./-]+\\\.\(push\|mirror\)\$$/.test(args[2] ?? '')
+  args.length === 3 && args[0] === 'config' && args[1] === '--get-regexp' && /^\^\(remote\\\.[A-Za-z0-9_\\./-]+\\\.\(push\|pushurl\|mirror\)\|url\\\.\.\*\\\.pushinsteadof\)\$$/.test(args[2] ?? '')
 
 const isRangeQuery = (args: readonly string[]) =>
   ((args.length === 4 && args[0] === 'rev-list' && args[1] === '--count') ||
@@ -255,12 +255,12 @@ describe('exhibits', () => {
       ['rev-parse', '--is-inside-work-tree', '--show-toplevel', '--show-prefix', '--abbrev-ref', 'HEAD', '--git-path', 'index'],
       ['rev-list', '--count', '--end-of-options', 'refs/heads/main..refs/remotes/origin/main'],
       ['log', '-20', '--no-show-signature', '--format=%ae', '--end-of-options', 'refs/heads/main..refs/remotes/origin/main'],
-      ['config', '--get-regexp', '^remote\\.origin\\.(push|mirror)$'],
+      ['config', '--get-regexp', '^(remote\\.origin\\.(push|pushurl|mirror)|url\\..*\\.pushinsteadof)$'],
     ])
     expect(argsOf('git push -f up.stream release/1.2')[1]).toEqual([
       'rev-list', '--count', '--end-of-options', 'refs/heads/release/1.2..refs/remotes/up.stream/release/1.2',
     ])
-    expect(argsOf('git push -f up.stream release/1.2')[3]).toEqual(['config', '--get-regexp', '^remote\\.up\\.stream\\.(push|mirror)$'])
+    expect(argsOf('git push -f up.stream release/1.2')[3]).toEqual(['config', '--get-regexp', '^(remote\\.up\\.stream\\.(push|pushurl|mirror)|url\\..*\\.pushinsteadof)$'])
     for (const command of [
       'git push --force',
       'git push -f',
