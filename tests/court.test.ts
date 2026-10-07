@@ -809,29 +809,36 @@ describe('court', () => {
     seatCourt(on, {
       reply: async () => new Promise(() => undefined),
     })
-    void $.tool.check(check('rm -rf node_modules'))
+    const pending = $.tool.check(check('rm -rf node_modules'))
     await clock.settle()
     const pane = await $.ui.mount({ ...PANE_SITE, surface: 'terminal', props: { ...PANE_SITE.props, bodyColumns: 46 } })
     expect(await pane.find({ text: /^Charge: recursive delete$/ })).toBeDefined()
     expect(await pane.find({ text: /^Case #0001   ·   Prior convictions: 0$/ })).toBeDefined()
+    // the trial ends inside the test, never filing into the next one
+    await clock.advance(9_000)
+    await pending
   })
 
   test('when the pane cannot be placed, the band tells the person to type /court', async ($, on) => {
     const clock = mock.clock(on)
     seatCourt(on, { reply: async () => new Promise(() => undefined), placed: false })
-    void $.tool.check(check('git push --force'))
+    const pending = $.tool.check(check('git push --force'))
     await clock.settle()
     const band = await $.ui.mount({ ...BAND_SITE, surface: 'terminal' })
     expect(await band.find({ text: /Court in session: force push · type \/court to watch/ })).toBeDefined()
+    await clock.advance(9_000)
+    await pending
   })
 
   test('when the pane is placed, the band does not tell the person to open it', async ($, on) => {
     const clock = mock.clock(on)
     seatCourt(on, { reply: async () => new Promise(() => undefined) })
-    void $.tool.check(check('git push --force'))
+    const pending = $.tool.check(check('git push --force'))
     await clock.settle()
     const band = await $.ui.mount({ ...BAND_SITE, surface: 'terminal' })
     expect(await band.find({ text: /^Court in session: force push$/ })).toBeDefined()
+    await clock.advance(9_000)
+    await pending
   })
 
   test("the court's ruling is shown as tight as the speeches", async ($, on) => {
