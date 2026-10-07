@@ -33,6 +33,20 @@ export type Docket = {
 }
 
 /**
+ * The layout of the saved docket this version writes, saved beside the
+ * cases. Bump it when a saved field changes meaning.
+ */
+export const DOCKET_LAYOUT = 1
+
+/**
+ * Whether this version can read a docket saved under a layout: one saved
+ * before layouts were recorded, or this layout. A newer layout is left
+ * untouched, never read and never overwritten.
+ */
+export const isReadableLayout = (stored: unknown): boolean =>
+  stored === undefined || stored === null || (typeof stored === 'number' && stored <= DOCKET_LAYOUT)
+
+/**
  * How many cases the docket keeps: the newest, by number.
  */
 export const DOCKET_CAP = 200

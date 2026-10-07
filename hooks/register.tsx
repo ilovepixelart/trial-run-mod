@@ -3,7 +3,7 @@ import type { EngineInterface, Register, ResultOf } from 'claude-code'
 
 import type { CourtRole, CourtTrial, CourtVerdict } from '../types'
 import { contemptKeyOf } from './contempt'
-import { casesOf, docketOf, fileCase, nextCaseNumber, priorsOf } from './docket'
+import { DOCKET_LAYOUT, casesOf, docketOf, fileCase, isReadableLayout, nextCaseNumber, priorsOf } from './docket'
 import type { CaseRecord } from './docket'
 import { gaugeOf } from './gauge'
 import { caseNumberOf, caseRowOf, docketLayoutOf, headerLinesOf, lineOf, rapSheetLayoutOf, wrapOf } from './layout'
@@ -24,6 +24,7 @@ const DOCKET_PANE = 'trial-run-docket'
  * The store key the docket lives under: every case the court has heard.
  */
 const CASES = 'cases'
+const LAYOUT = 'layout'
 
 /**
  * The whole trial's deadline. A hook's own budget is ten seconds and a
@@ -123,9 +124,21 @@ const quietly = (work: Promise<unknown>) => {
   work.catch(() => undefined)
 }
 
+/**
+ * Whether the saved docket is in a layout this version reads; a store that
+ * fails reads as readable, so the court keeps working without it.
+ */
+const isDocketReadable = async ($: EngineInterface): Promise<boolean> => {
+  try {
+    return isReadableLayout(await $.store.get(LAYOUT))
+  } catch {
+    return true
+  }
+}
+
 const casesFrom = async ($: EngineInterface): Promise<CaseRecord[]> => {
   try {
-    return casesOf(await $.store.get(CASES))
+    return (await isDocketReadable($)) ? casesOf(await $.store.get(CASES)) : []
   } catch {
     return []
   }
@@ -137,7 +150,11 @@ const casesFrom = async ($: EngineInterface): Promise<CaseRecord[]> => {
  */
 const fileOnDocket = async ($: EngineInterface, filing: Omit<CaseRecord, 'number'>) => {
   try {
+    if (!(await isDocketReadable($))) {
+      return
+    }
     await $.store.set(CASES, fileCase(await casesFrom($), filing))
+    await $.store.set(LAYOUT, DOCKET_LAYOUT)
   } catch {
     // the ruling stands without its docket entry
   }
@@ -630,6 +647,15 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'Pane', requestId: DOCKET_PANE }, async ($, e) => {
     const { Box, Text } = $.ui.resolve(e)
+    if (!(await isDocketReadable($))) {
+      return (
+        <Box key="docket" flexDirection="column" borderStyle={framed(e)} borderDimColor paddingX={1}>
+          <Text bold color={GOLD}>THE DOCKET</Text>
+          <Text dimColor>This docket was saved by a newer trial-run.</Text>
+          <Text dimColor>Update the mod; nothing was changed.</Text>
+        </Box>
+      )
+    }
     const docket = docketOf(await casesFrom($))
     if (docket.total === 0) {
       return (

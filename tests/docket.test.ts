@@ -1,6 +1,6 @@
 import { describe, expect, test, tier } from 'claude-code/testing'
 
-import { casesOf, docketOf, fileCase, priorsOf } from '../hooks/docket'
+import { DOCKET_LAYOUT, casesOf, docketOf, fileCase, isReadableLayout, priorsOf } from '../hooks/docket'
 import type { CaseRecord } from '../hooks/docket'
 
 tier('user')
@@ -122,5 +122,13 @@ describe('docket', () => {
       { charge: 'hard reset', count: 1 },
     ])
     expect(docket.mostWanted).toBe('force push')
+  })
+
+  test('a docket with no layout or this layout is readable; a newer one is not', () => {
+    expect(DOCKET_LAYOUT).toBe(1)
+    expect(isReadableLayout(undefined)).toBe(true)
+    expect(isReadableLayout(1)).toBe(true)
+    expect(isReadableLayout(2)).toBe(false)
+    expect(isReadableLayout(17)).toBe(false)
   })
 })
