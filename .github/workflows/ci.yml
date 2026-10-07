@@ -1,0 +1,45 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+  schedule:
+    # Nightly against the newest Claude Code: the mod API is early access and
+    # can change between releases without notice.
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Claude Code
+        run: |
+          curl -fsSL https://claude.ai/install.sh | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Claude Code version
+        run: claude --version
+
+      - name: Validate
+        run: claude plugin validate --strict .
+
+      - name: Test
+        run: claude plugin test .
+
+      # The engine writes the type declarations into .claude-plugin/types/ when
+      # it loads the plugin, which happens before the login check; with no
+      # credentials the run then exits non-zero by design. The file check is the gate.
+      - name: Write type declarations
+        run: |
+          claude --plugin-dir . -p ping || true
+          test -f .claude-plugin/types/claude-code/index.d.ts
+
+      - name: Typecheck
+        run: npx -y -p typescript tsc -p .
