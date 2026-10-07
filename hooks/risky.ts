@@ -101,7 +101,13 @@ export const RULES: readonly Rule[] = [
 ]
 
 const WRAPPERS = new Set(['sudo', 'env', 'nice', 'time', 'command', 'builtin', 'exec', 'nohup', 'xargs'])
-const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash'])
+const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'mksh', 'ash', 'fish'])
+
+/**
+ * Programs that run the value of their `-c` / `--command` option as a shell
+ * script (`su -c '...'`, `sg staff -c '...'`, `script -c '...'`).
+ */
+const RUNNERS = new Set(['su', 'sg', 'script'])
 
 /**
  * Reserved words that lead a simple command inside a compound one
@@ -481,15 +487,62 @@ const commandsOf = (segment: string, depth = 0): Simple[] => {
   return [...own, ...scripts.flatMap(nested)]
 }
 
+/**
+ * The value of a `-c` (bundled or not: `-lc`) or `--command` option at
+ * `at`, or undefined when that word is no such option.
+ */
+const commandOptionOf = (words: readonly string[], at: number): string | undefined => {
+  const word = words[at] ?? ''
+  const long = /^--command(?:=([\s\S]*))?$/.exec(word)
+  if (long !== null) {
+    return long[1] ?? words[at + 1] ?? ''
+  }
+  return /^-[A-Za-z]*c$/.test(word) ? (words[at + 1] ?? '') : undefined
+}
+
+/**
+ * The script a shell runs from its first operand: with `-c` in any of its
+ * flags (`bash -lc`, `sh -ec`, `bash -c -x`), or `--command` (fish).
+ */
+const shellScriptOf = (words: readonly string[]): string | undefined => {
+  let isCommand = false
+  let at = 1
+  while (at < words.length && /^[-+]./.test(words[at] ?? '') && words[at] !== '--') {
+    const word = words[at] ?? ''
+    const script = word.startsWith('--') ? commandOptionOf(words, at) : undefined
+    if (script !== undefined) {
+      return script
+    }
+    isCommand ||= /^-[A-Za-z]*c/.test(word)
+    // -o / -O name an option in the next word; so do --rcfile and --init-file
+    at += /^[-+][A-Za-z]*[oO]$|^--(rcfile|init-file)$/.test(word) ? 2 : 1
+  }
+  at += words[at] === '--' || words[at] === '-' ? 1 : 0
+  return isCommand ? (words[at] ?? '') : undefined
+}
+
+/**
+ * The script a runner takes from `-c` or `--command`; `sg` also runs the
+ * operand after its group without one.
+ */
+const runnerScriptOf = (words: readonly string[]): string | undefined => {
+  for (let at = 1; at < words.length; at += 1) {
+    const script = commandOptionOf(words, at)
+    if (script !== undefined) {
+      return script
+    }
+  }
+  return words[0] === 'sg' ? words.slice(1).filter(word => !word.startsWith('-'))[1] : undefined
+}
+
 const innerScriptOf = (words: readonly string[]): string | undefined => {
   if (words[0] === 'eval') {
     return words.slice(1).join(' ')
   }
-  const flag = words.indexOf('-c')
-  if (SHELLS.has(words[0] ?? '') && flag > 0) {
-    return words[flag + 1] ?? ''
+  if (SHELLS.has(words[0] ?? '')) {
+    return shellScriptOf(words)
   }
-  return undefined
+  return RUNNERS.has(words[0] ?? '') ? runnerScriptOf(words) : undefined
 }
 
 /**
@@ -503,7 +556,7 @@ const PLAIN_LINE = /^[A-Za-z0-9_@%+=:,./~ -]+$/
  */
 const TILDE = /(^|[ =:])~/
 
-const NOT_SIMPLE_HEADS = new Set([...WRAPPERS, ...SHELLS, 'eval', 'source', '.'])
+const NOT_SIMPLE_HEADS = new Set([...WRAPPERS, ...SHELLS, ...RUNNERS, 'eval', 'source', '.'])
 
 /**
  * Whether a whole command line is one simple command of plain words: no

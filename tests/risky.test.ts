@@ -203,6 +203,38 @@ describe('risky', () => {
     }
   })
 
+  test('a script a shell or runner takes from -c is charged, whatever flags share its word', () => {
+    for (const command of [
+      "bash -lc 'rm -rf src'",
+      "sh -ec 'rm -rf src'",
+      "bash -xc 'rm -rf src'",
+      "bash -c -x 'rm -rf src'",
+      "bash -o errexit -c 'rm -rf src'",
+      "/bin/bash --login -c 'rm -rf src'",
+      "fish -c 'rm -rf src'",
+      "fish --command='rm -rf src'",
+      "ksh -c 'rm -rf src'",
+      "zsh -c 'rm -rf src'",
+      "dash -c 'rm -rf src'",
+      "su -c 'rm -rf src'",
+      "su root -c 'rm -rf src'",
+      "su -lc 'rm -rf src'",
+      "su --command='rm -rf src' root",
+      "sg staff -c 'rm -rf src'",
+      "sg staff 'rm -rf src'",
+      "script -q -c 'rm -rf src' /dev/null",
+      "script --command 'rm -rf src' log.txt",
+    ]) {
+      expect(chargeOf(command)?.id, command).toBe('recursive-delete')
+    }
+  })
+
+  test('a shell or runner whose script is harmless, or a script file however named, is not charged', () => {
+    for (const command of ["bash -lc 'ls'", "sh -ec 'ls -R'", 'bash x.sh', "bash -x 'rm -rf src'", 'su -l root', 'sg staff ls', "script -q -c 'ls' out.txt", 'fish -c ls']) {
+      expect(chargeOf(command), command).toBeUndefined()
+    }
+  })
+
   test('a nested script with a separator inside its quotes is read whole, as the inner shell reads it', () => {
     const cases: readonly (readonly [string, string])[] = [
       ['bash -c "echo hi; \\"rm\\" -rf src"', 'recursive-delete'],
