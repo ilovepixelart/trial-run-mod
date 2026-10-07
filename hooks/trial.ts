@@ -83,12 +83,18 @@ export const testimonyOf = (messages: readonly SessionMessage[]): Pick<Case, 'mo
   return { plea: latest('user'), motive: latest('assistant') }
 }
 
+/**
+ * Evidence as it is quoted: angle brackets escaped, so no evidence can
+ * close its own tag or open another witness's.
+ */
+const quotedOf = (text: string) => text.replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+
 const briefOf = (one: Case) =>
   `Charge: ${one.charge.label}\n` +
-  `<command>${one.command}</command>\n` +
-  (one.plea === '' ? '' : `<person>${one.plea}</person>\n`) +
-  (one.motive === '' ? '' : `<agent>${one.motive}</agent>\n`) +
-  one.exhibits.map(line => `<exhibit>${line}</exhibit>\n`).join('')
+  `<command>${quotedOf(one.command)}</command>\n` +
+  (one.plea === '' ? '' : `<person>${quotedOf(one.plea)}</person>\n`) +
+  (one.motive === '' ? '' : `<agent>${quotedOf(one.motive)}</agent>\n`) +
+  one.exhibits.map(line => `<exhibit>${quotedOf(line)}</exhibit>\n`).join('')
 
 const LABEL_LINE = /^\s*(#{1,6}\s.*|\*\*[^*]+\*\*:?|[A-Z][A-Z ]+:)\s*$/
 

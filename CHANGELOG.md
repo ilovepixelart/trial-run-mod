@@ -9,6 +9,7 @@ All notable changes to trial-run. Versions follow [Semantic Versioning](https://
 - Risky Bash commands go to trial before they run: recursive delete, force push, hard reset, forced `git clean`, dropped or truncated SQL data, `kubectl delete` and `terraform destroy`, looking through wrappers, nested shells, global flags and compound commands.
 - A prosecution, a defense and a judge (three Haiku calls) argue in a pane; guilty denies with the judge's reason, not guilty defers to your permission rules, a mistrial asks.
 - Sentencing: every conviction names the safer command for its charge.
+- Evidence is quoted with its angle brackets escaped, so no command, message or exhibit can close its tag and pose as another witness.
 - Exhibits: before the speeches the court reads facts from git (upstream commits a force push would overwrite and their distinct authors, local commits a hard reset would drop, whether a deleted path is tracked, untracked and ignored files a clean would remove) and enters them into evidence and the pane. Read-only commands from a fixed allowlist, by argv, hardened against repository config, 500 ms in all; a slow or failing git leaves the exhibit out.
 - Contempt of court: retrying a convicted command in the same conversation is denied with no trial and no model call. A new session, `/clear`, `/resume` and `/branch` forgive it; a compaction does not.
 - `/court` (the last trial) and `/court docket` (conviction rate, recent cases, verdict strip, rap sheet).
