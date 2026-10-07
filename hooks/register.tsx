@@ -4,7 +4,7 @@ import type { EngineInterface, Register, ResultOf } from 'claude-code'
 import type { CourtRole, CourtTrial, CourtVerdict } from '../types'
 import { contemptKeyOf } from './contempt'
 import { DOCKET_LAYOUT, casesOf, docketOf, fileCase, isReadableLayout, nextCaseNumber, precedentOf, priorsOf } from './docket'
-import { GIT_ENV, exhibitLinesOf, factsOf, isLexicalPath, materialOf, planOf, statPathsOf, targetsIn, withModified, withoutTargets } from './exhibits'
+import { GIT_ENV, exhibitLinesOf, factsOf, isLexicalPath, materialOf, namesAlong, planOf, statPathsOf, targetsIn, withModified, withoutTargets } from './exhibits'
 import type { ExhibitResult, Facts } from './exhibits'
 import type { CaseRecord } from './docket'
 import { gaugeOf } from './gauge'
@@ -129,6 +129,27 @@ const testimonyFrom = async ($: EngineInterface) => {
 }
 
 /**
+ * Whether every delete target is where git looks: strictly inside the
+ * working tree, landing where its spelling says (a symbolic link in any
+ * part sends it elsewhere), and each part listed by its directory with
+ * that exact spelling (a case alias opens another name). Any other target
+ * is somewhere git never looks, so every target is unknown.
+ */
+const isEveryTargetPlaced = async ($: EngineInterface, targets: readonly string[], top: string | undefined): Promise<boolean> => {
+  const along = targets.map(target => namesAlong(target, top))
+  if (along.includes(undefined)) {
+    return false
+  }
+  const [here, ...there] = await Promise.all([$.fs.stat('.', { resolve: true }), ...targets.map(target => $.fs.stat(target, { resolve: true }))])
+  if (!targets.every((target, at) => isLexicalPath(here?.realPath ?? '', target, there[at]?.realPath))) {
+    return false
+  }
+  const names = along.flatMap(one => one ?? [])
+  const listed = await Promise.all(names.map(async ({ dir, name }) => (await $.fs.list(dir)).some(entry => entry.name === name)))
+  return listed.every(Boolean)
+}
+
+/**
  * The facts the repository gives on a charged command. Read-only git by
  * argv from `planOf`'s allowlist; a git that fails, is refused or is still
  * running at the bound gives no fact, never an error.
@@ -148,18 +169,12 @@ const factsFrom = async ($: EngineInterface, command: string): Promise<Facts> =>
       ]),
     ),
   )
-  // a target behind a symbolic link is somewhere git never looks: unknown
+  const read = factsOf(plan, results)
   const targets = targetsIn(plan)
   const isPlaced =
     targets.length === 0 ||
-    (await Promise.race([
-      Promise.all([$.fs.stat('.', { resolve: true }), ...targets.map(target => $.fs.stat(target, { resolve: true }))]).then(
-        ([here, ...there]) => targets.every((target, at) => isLexicalPath(here?.realPath ?? '', target, there[at]?.realPath)),
-        () => false,
-      ),
-      bound.then(() => false),
-    ]))
-  const facts = isPlaced ? factsOf(plan, results) : withoutTargets(factsOf(plan, results))
+    (await Promise.race([isEveryTargetPlaced($, targets, read.top).catch(() => false), bound.then(() => false)]))
+  const facts = isPlaced ? read : withoutTargets(read)
   // each indexed file against the index, within the same bound; a file
   // that will not stat, or a bound that runs out, leaves the change unknown
   const paths = statPathsOf(facts)

@@ -372,6 +372,93 @@ describe('the world changes between two identical commands', () => {
 
       expect(seen.calls).toHaveLength(6)
     })
+
+    describe('a target git reads elsewhere than rm deletes', () => {
+      // $.fs.stat as Bun's realpath answers it: `..` folded by spelling
+      const folded = (path: string) => {
+        const parts: string[] = []
+        for (const part of path.split('/')) {
+          if (part === '..') {
+            parts.pop()
+          } else if (part !== '' && part !== '.') {
+            parts.push(part)
+          }
+        }
+        return `/${parts.join('/')}`
+      }
+      const realFs = (path: string, resolve: boolean) => plainStat(resolve ? folded(path) : path, resolve, fileAt(path, 5))
+      // git that matches spellings exactly: only `src` is tracked, and only it holds a.txt
+      const exactGit = (argv: readonly string[]) => {
+        const target = argv.at(-1)
+        if (argv.includes('rev-parse')) {
+          return gitSaid(HERE)
+        }
+        if (argv.includes('--error-unmatch')) {
+          return target === 'src' ? gitSaid('src/a.txt\n') : gitSaid('', 1)
+        }
+        return argv.includes('--debug') && target === 'src'
+          ? gitSaid('src/a.txt\n  ctime: 100:0\n  mtime: 100:250000000\n  dev: 1\tino: 2\n  uid: 1\tgid: 1\n  size: 5\tflags: 0\n')
+          : gitSaid('')
+      }
+      // a case-insensitive file system: any spelling opens src and keeps its
+      // own spelling in realPath, but the directory lists it as src
+      const caseless = (path: string) => (path.toLowerCase().endsWith('/src') ? ['a.txt'] : ['src', '.git'])
+      const attacks: [string, string, (argv: readonly string[]) => ReturnType<typeof gitSaid>][] = [
+        // git reads the repository's src; the kernel follows lnk, then `..`
+        ['a .. part', 'rm -rf lnk/../src', treeGit(() => clean)],
+        ['the repository store', 'rm -rf .git', exactGit],
+        ['inside the repository store', 'rm -rf .git/refs', exactGit],
+        ['the repository store beside a plain target', 'rm -rf src .git', treeGit(() => clean)],
+        ['the top level by its absolute path', 'rm -rf /work/app', treeGit(() => clean)],
+        ['an ancestor of the top level', 'rm -rf /work', treeGit(() => clean)],
+        ['the working directory at the top level', 'rm -rf .', treeGit(() => clean)],
+        ['a case alias of a tracked folder', 'rm -rf SRC', exactGit],
+        ['a case alias of the repository store', 'rm -rf .GIT', exactGit],
+      ]
+      for (const [name, command, git] of attacks) {
+        test(`${name} (${command}): tried both times, no exhibit about it, no precedent`, async ($, on) => {
+          mock.clock(on)
+          const saved = memoryStore(on)
+          const seen = seatCourt(on, { ...verdictBench(ACQUITTED), git, root: () => '/work/app', fs: realFs, list: caseless })
+
+          await $.tool.check(check(command))
+          await $.tool.check(check(command))
+
+          expect(seen.calls).toHaveLength(6)
+          expect(seen.prompts.judge).not.toContain('<exhibit>')
+          expect((saved.get('cases') as { precedent?: number }[]).map(one => one.precedent)).toEqual([undefined, undefined])
+        })
+      }
+
+      for (const command of ['rm -rf src', 'rm -rf ./src', 'rm -rf /work/app/src']) {
+        test(`${command}, spelled as listed, keeps its exhibit and binds precedent`, async ($, on) => {
+          mock.clock(on)
+          const saved = memoryStore(on)
+          const listing = (path: string) => (path.toLowerCase().endsWith('/src') ? ['a.txt'] : ['src', '.git'])
+          const seen = seatCourt(on, { ...verdictBench(ACQUITTED), git: treeGit(() => clean), root: () => '/work/app', fs: realFs, list: listing })
+
+          await $.tool.check(check(command))
+          expect(seen.prompts.judge).toContain(`<exhibit>Exhibit A: ${command.slice(7)} is tracked by git, so history keeps it.</exhibit>`)
+          await $.tool.check(check(command))
+
+          expect(seen.calls).toHaveLength(3)
+          expect((saved.get('cases') as { precedent?: number }[]).map(one => one.precedent)).toEqual([undefined, 1])
+        })
+      }
+
+      test('a directory that will not list leaves the target unknown', async ($, on) => {
+        mock.clock(on)
+        memoryStore(on)
+        const seen = seatCourt(on, { ...verdictBench(ACQUITTED), git: treeGit(() => clean), root: () => '/work/app', fs: realFs, list: () => undefined })
+
+        await $.tool.check(check('rm -rf src'))
+        await $.tool.check(check('rm -rf src'))
+
+        expect(seen.calls).toHaveLength(6)
+        expect(seen.prompts.judge).not.toContain('<exhibit>')
+      })
+    })
+
   })
 
   describe('a target behind a symbolic link', () => {

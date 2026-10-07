@@ -37,6 +37,12 @@ export type Bench = {
    * lands where it is spelled.
    */
   fs?: (path: string, resolve: boolean) => FsStat | undefined
+  /**
+   * The names a directory lists, by absolute path as for `fs`; undefined
+   * refuses it. Absent, a directory lists each name the court stat'd
+   * directly under it, so every path stat'd is there as spelled.
+   */
+  list?: (path: string) => readonly string[] | undefined
 }
 
 /**
@@ -121,9 +127,19 @@ export const seatCourt = (on: On, bench: Bench): Record => {
       return { value: await git(e.argv) }
     })
   }
+  const statted = new Set<string>()
   on('fs.stat', ($, e) => {
+    statted.add(e.path)
     const stat = bench.fs === undefined ? plainStat(e.path, e.resolve) : bench.fs(e.path, e.resolve)
     return stat === undefined ? { deny: 'refused' } : { value: stat }
+  })
+  on('fs.list', ($, e) => {
+    const dir = e.path.endsWith('/') ? e.path : `${e.path}/`
+    const under = [...statted].filter(path => path.startsWith(dir)).map(path => path.slice(dir.length).split('/')[0] ?? '')
+    const names = bench.list === undefined ? [...new Set(under)].filter(name => name !== '') : bench.list(e.path)
+    return names === undefined
+      ? { deny: 'refused' }
+      : { value: names.map(name => ({ name, kind: 'dir' as const, size: 0, mtimeMs: 0, isLink: false })) }
   })
   on('audio.play', () => ({ value: undefined }))
   on('audio.speak', () => ({ value: { via: 'system' } }))

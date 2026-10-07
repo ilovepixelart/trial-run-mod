@@ -1,6 +1,6 @@
 import { describe, expect, test, tier } from 'claude-code/testing'
 
-import { GIT_ENV, GIT_HARDENING, exhibitLinesOf, factsOf, isSameMaterial, materialFactsOf, materialOf, planOf, sanitizedOf, isLexicalPath, statPathsOf, targetsIn, withModified, withoutTargets } from '../hooks/exhibits'
+import { GIT_ENV, GIT_HARDENING, exhibitLinesOf, factsOf, isSameMaterial, materialFactsOf, materialOf, namesAlong, planOf, sanitizedOf, isLexicalPath, statPathsOf, targetsIn, withModified, withoutTargets } from '../hooks/exhibits'
 import type { ExhibitQuery } from '../hooks/exhibits'
 
 tier('user')
@@ -476,6 +476,25 @@ describe('exhibits', () => {
         tracked: { src: true }, untracked: { src: 0 }, ignoredIn: { src: 0 }, indexed: { src: [] }, modifiedIn: { src: 0 },
       }
       expect(withoutTargets(facts)).toEqual({ isRepo: true, top: '/work/app', prefix: '', branch: 'main' })
+    })
+  })
+
+  describe('the names a target passes through', () => {
+    test('each name is checked in the directory that must list it by that spelling', () => {
+      expect(namesAlong('src', undefined)).toEqual([{ dir: '.', name: 'src' }])
+      expect(namesAlong('./src//a', undefined)).toEqual([{ dir: '.', name: 'src' }, { dir: 'src', name: 'a' }])
+      expect(namesAlong('/work/app/src/a', '/work/app')).toEqual([{ dir: '/work/app', name: 'src' }, { dir: '/work/app/src', name: 'a' }])
+      expect(namesAlong('/r', '/')).toEqual([{ dir: '/', name: 'r' }])
+    })
+
+    test('the working directory, the top level, an ancestor of it or a path elsewhere has none', () => {
+      const none: [string, string | undefined][] = [
+        ['.', '/work/app'], ['./.', '/work/app'], ['/work/app', '/work/app'], ['/work/app/./', '/work/app'], ['/work', '/work/app'],
+        ['/', '/work/app'], ['/work/application/src', '/work/app'], ['/work/other/src', '/work/app'], ['/work/app/src', undefined],
+      ]
+      for (const [target, top] of none) {
+        expect(namesAlong(target, top), target).toBeUndefined()
+      }
     })
   })
 

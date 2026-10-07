@@ -420,6 +420,33 @@ export const isLexicalPath = (here: string, target: string, real: string | undef
   real !== undefined && real === foldedOf(target.startsWith('/') ? target : `${here}/${target}`)
 
 /**
+ * Each name a target's spelling passes through, with the directory that
+ * must list it by that exact spelling: on a case-insensitive file system
+ * `SRC` opens `src`, while git, matching spellings, reads nothing there. A
+ * relative target is listed from the working directory, an absolute one
+ * from the repository's top level. Undefined when the target is the
+ * working directory itself, or an absolute path not strictly inside the
+ * top level by its spelling (the top level, an ancestor of it, anywhere
+ * else): a delete there takes the repository's history with it.
+ *
+ * @param target the path as the command names it
+ * @param top the repository's top level, as git reported it
+ */
+export const namesAlong = (target: string, top: string | undefined): { dir: string; name: string }[] | undefined => {
+  const partsOf = (path: string) => path.split('/').filter(part => part !== '' && part !== '.')
+  const isAbsolute = target.startsWith('/')
+  const above = isAbsolute ? partsOf(top ?? '') : []
+  const parts = partsOf(target)
+  const isInside = (!isAbsolute || top !== undefined) && parts.length > above.length && above.every((part, at) => parts[at] === part)
+  return isInside
+    ? parts.slice(above.length).map((name, at) => {
+        const dir = parts.slice(0, above.length + at).join('/')
+        return { dir: isAbsolute ? `/${dir}` : dir === '' ? '.' : dir, name }
+      })
+    : undefined
+}
+
+/**
  * The facts with every fact about the delete targets removed.
  */
 export const withoutTargets = (facts: Facts): Facts => {
