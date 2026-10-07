@@ -1,10 +1,24 @@
 {
   "name": "trial-run",
+  "displayName": "Trial Run",
   "version": "0.1.0",
   "description": "Puts risky shell commands on trial: a prosecutor, a defense and a judge argue in a pane, and the verdict decides whether the command runs.",
-  "types": "./types/index.d.ts",
   "author": {
     "name": "ilovepixelart",
     "email": "ilovepixelart@users.noreply.github.com"
-  }
+  },
+  "homepage": "https://github.com/ilovepixelart/trial-run-mod#readme",
+  "repository": "https://github.com/ilovepixelart/trial-run-mod",
+  "license": "MIT",
+  "keywords": [
+    "guardrails",
+    "ai-safety",
+    "git",
+    "terraform",
+    "kubectl",
+    "tui",
+    "function-hooks",
+    "claude-code-mod"
+  ],
+  "types": "./types/index.d.ts"
 }
