@@ -1,4 +1,4 @@
-import { chargedOf } from './risky'
+import { chargedOf, isSimpleCommand } from './risky'
 
 /**
  * Flags every exhibit runs git with. A repository's own config can name
@@ -98,7 +98,48 @@ const targetsOf = (words: readonly string[]): string[] => {
       targets.push(word)
     }
   }
-  return targets.slice(0, MAX_TARGETS)
+  return targets
+}
+
+/**
+ * The targets git can be asked about exactly as `rm` will remove them: at
+ * most three, none ending in `/` (which follows a symlink to a directory
+ * git never looks into). Otherwise none, and the targets are unknown.
+ */
+const readableTargetsOf = (words: readonly string[]): string[] => {
+  const targets = targetsOf(words)
+  return targets.length > MAX_TARGETS || targets.some(target => target.endsWith('/')) ? [] : targets
+}
+
+/**
+ * A remote or branch name git reads as that name and nothing else.
+ */
+const PLAIN_REF = /^[A-Za-z0-9_][A-Za-z0-9._/-]*$/
+
+const isPlainRef = (name: string) =>
+  PLAIN_REF.test(name) && !name.includes('..') && !name.includes('//') && !name.endsWith('/') && !name.endsWith('.lock')
+
+/**
+ * The commands for a force push that names exactly one remote and one
+ * branch (`git push --force origin main`): the branch against that remote's
+ * copy of it, by name. Any other form (no remote or branch, a refspec with
+ * `:` or `+`, several branches, another option) pushes something these
+ * would not describe, so it gets none.
+ */
+const pushPlanOf = (words: readonly string[]): ExhibitQuery[] => {
+  const rest = words.slice(2)
+  const flags = rest.filter(word => word.startsWith('-'))
+  const named = rest.filter(word => !word.startsWith('-'))
+  const [remote = '', branch = ''] = named
+  if (flags.some(flag => flag !== '--force' && flag !== '-f') || named.length !== 2 || !isPlainRef(remote) || !isPlainRef(branch)) {
+    return []
+  }
+  const range = `${branch}..${remote}/${branch}`
+  return [
+    INSIDE,
+    query('behind', git('rev-list', '--count', '--end-of-options', range)),
+    query('authors', git('log', '-20', '--no-show-signature', '--format=%ae', '--end-of-options', range)),
+  ]
 }
 
 const hasShortFlag = (words: readonly string[], letter: string) =>
@@ -106,41 +147,45 @@ const hasShortFlag = (words: readonly string[], letter: string) =>
 
 /**
  * The git commands the court runs for a charged command, from a fixed
- * allowlist; every path is passed after `--`, so it is never an option.
+ * allowlist; every path is passed after `--` and every ref after
+ * `--end-of-options`, so neither is ever an option. Only a simple command
+ * line is read: one the shell runs in this directory with every word as
+ * written, so the facts are about what it will touch. Any other line, and
+ * a `git` with options before its subcommand (`git -C dir`), gets none.
  *
  * @param command the Bash tool's `command`, as the model wrote it
  */
 export const planOf = (command: string): ExhibitQuery[] => {
-  const charged = chargedOf(command)
+  const charged = isSimpleCommand(command) ? chargedOf(command) : undefined
   if (charged === undefined) {
     return []
   }
   const { charge, words } = charged
   switch (charge.id) {
     case 'force-push':
-      return [
-        INSIDE,
-        query('behind', git('rev-list', '--count', 'HEAD..@{upstream}')),
-        query('authors', git('log', '-20', '--no-show-signature', '--format=%ae', 'HEAD..@{upstream}')),
-      ]
+      return words[1] === 'push' ? pushPlanOf(words) : []
     case 'hard-reset':
-      return [INSIDE, query('ahead', git('rev-list', '--count', '@{upstream}..HEAD'))]
+      return words[1] === 'reset' ? [INSIDE, query('ahead', git('rev-list', '--count', '@{upstream}..HEAD'))] : []
     case 'recursive-delete':
       return words[0] !== 'rm'
         ? [INSIDE]
         : [
             INSIDE,
-            ...targetsOf(words).flatMap(target => [
+            ...readableTargetsOf(words).flatMap(target => [
               query('tracked', git('ls-files', '--error-unmatch', '--', target), target),
               query('untracked', git('ls-files', '--others', '--exclude-standard', '--', target), target),
             ]),
           ]
     case 'git-clean':
-      return [
-        INSIDE,
-        query('untracked', git('ls-files', '--others', '--exclude-standard')),
-        ...(hasShortFlag(words, 'x') ? [query('ignored', git('ls-files', '--others', '--ignored', '--exclude-standard'))] : []),
-      ]
+      return words[1] === 'clean'
+        ? [
+            INSIDE,
+            query('untracked', git('ls-files', '--others', '--exclude-standard')),
+            ...(hasShortFlag(words, 'x') || hasShortFlag(words, 'X')
+              ? [query('ignored', git('ls-files', '--others', '--ignored', '--exclude-standard'))]
+              : []),
+          ]
+        : []
     default:
       return []
   }
@@ -197,6 +242,16 @@ export const factsOf = (plan: readonly ExhibitQuery[], results: readonly Exhibit
         break
     }
   })
+  // the targets are read together or not at all: one unread leaves every
+  // target unknown, never a partial picture
+  const targets = plan.filter(one => one.target !== undefined)
+  const isEveryTargetRead = targets.every(one =>
+    one.kind === 'tracked' ? facts.tracked?.[one.target ?? ''] !== undefined : facts.untracked?.[one.target ?? ''] !== undefined,
+  )
+  if (!isEveryTargetRead) {
+    delete facts.tracked
+    delete facts.untracked
+  }
   return facts.isRepo === false ? { isRepo: false } : facts
 }
 

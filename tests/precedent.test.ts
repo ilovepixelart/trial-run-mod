@@ -119,3 +119,52 @@ describe('precedent fails closed', () => {
   })
 })
 
+describe('targets the shell reads differently', () => {
+  // git that calls every path tracked: the reassuring answer, were it asked
+  const reassuring = (argv: readonly string[]) =>
+    argv.includes('rev-parse') ? gitSaid('true\n') : argv.includes('rev-list') ? gitSaid('0\n') : argv.includes('--error-unmatch') ? gitSaid('x\n') : gitSaid('')
+
+  for (const command of [
+    'rm -rf "build" src',
+    'rm -rf build\\ src',
+    'rm -rf ~/x',
+    'rm -rf $HOME',
+    'rm -rf {dist,src}',
+    'rm -rf src/*',
+    'rm -rf a b c d',
+    'rm -rf build/',
+    'cd app && rm -rf build',
+    'git push --force origin HEAD:main',
+    'git push --force',
+    'git -C ../other push --force origin main',
+  ]) {
+    test(`${command}: tried every time, no exhibit, no precedent`, async ($, on) => {
+      mock.clock(on)
+      const saved = memoryStore(on)
+      const seen = seatCourt(on, { ...verdictBench(ACQUITTED), git: reassuring, root: () => '/work/app' })
+
+      await $.tool.check(check(command))
+      await $.tool.check(check(command))
+
+      expect(seen.calls).toHaveLength(6)
+      for (const role of ['prosecutor', 'defense', 'judge'] as const) {
+        expect(seen.prompts[role], role).not.toContain('<exhibit>')
+      }
+      expect((saved.get('cases') as { precedent?: number }[]).map(one => one.precedent)).toEqual([undefined, undefined])
+    })
+  }
+
+  test('a plain target, a path after --, and a push naming its branch keep their exhibits', async ($, on) => {
+    mock.clock(on)
+    memoryStore(on)
+    const seen = seatCourt(on, { ...verdictBench(GUILTY), git: reassuring, root: () => '/work/app' })
+
+    await $.tool.check(check('rm -rf node_modules'))
+    expect(seen.prompts.judge).toContain('<exhibit>Exhibit A: node_modules is tracked by git, so history keeps it.</exhibit>')
+    await $.tool.check(check('rm -rf -- -x'))
+    expect(seen.prompts.judge).toContain('<exhibit>Exhibit A: -x is tracked by git, so history keeps it.</exhibit>')
+    await $.tool.check(check('git push --force origin main'))
+    expect(seen.prompts.judge).toContain('<exhibit>Exhibit A: the upstream branch has no commits this branch lacks.</exhibit>')
+  })
+})
+

@@ -14,13 +14,23 @@ const subcommandOf = (query: ExhibitQuery) => query.argv.slice(1 + GIT_HARDENING
 
 const ALLOWED = [
   ['rev-parse', '--is-inside-work-tree'],
-  ['rev-list', '--count', 'HEAD..@{upstream}'],
   ['rev-list', '--count', '@{upstream}..HEAD'],
-  ['log', '-20', '--no-show-signature', '--format=%ae', 'HEAD..@{upstream}'],
 ]
+
+/**
+ * A range between two plain ref names, as a named push reads it.
+ */
+const RANGE = /^[A-Za-z0-9._\/-]+\.\.[A-Za-z0-9._\/-]+$/
+
+const isRangeQuery = (args: readonly string[]) =>
+  ((args.length === 4 && args[0] === 'rev-list' && args[1] === '--count') ||
+    (args.length === 6 && args[0] === 'log' && args[1] === '-20' && args[2] === '--no-show-signature' && args[3] === '--format=%ae')) &&
+  args.at(-2) === '--end-of-options' &&
+  RANGE.test(args.at(-1) ?? '')
 
 const isAllowed = (args: readonly string[]) =>
   ALLOWED.some(allowed => allowed.length === args.length && allowed.every((word, i) => word === args[i])) ||
+  isRangeQuery(args) ||
   (args[0] === 'ls-files' && args.at(-2) === '--' &&
     [['--error-unmatch'], ['--others', '--exclude-standard'], ['--others', '--ignored', '--exclude-standard']].some(
       flags => flags.length === args.length - 3 && flags.every((flag, i) => flag === args[i + 1]),
@@ -35,6 +45,7 @@ const COMMANDS = [
   'rm -rf -- -rf "a b" $(touch x)',
   'git push --force origin main',
   'git push -f',
+  'git push -f origin main',
   'git reset --hard HEAD~3',
   'git clean -fdx',
   'git clean -fd',
@@ -98,9 +109,11 @@ describe('exhibits', () => {
     expect(kinds('git push --force origin main')).toEqual(['inside', 'behind', 'authors'])
     expect(kinds('git reset --hard HEAD~3')).toEqual(['inside', 'ahead'])
     expect(kinds('rm -rf src')).toEqual(['inside', 'tracked', 'untracked'])
-    expect(kinds('rm -rf a b c d')).toEqual(['inside', 'tracked', 'untracked', 'tracked', 'untracked', 'tracked', 'untracked'])
+    // more targets than the court reads: none are read, never a partial picture
+    expect(kinds('rm -rf a b c d')).toEqual(['inside'])
     expect(kinds('git clean -fd')).toEqual(['inside', 'untracked'])
     expect(kinds('git clean -fdx')).toEqual(['inside', 'untracked', 'ignored'])
+    expect(kinds('git clean -fdX')).toEqual(['inside', 'untracked', 'ignored'])
     expect(kinds('terraform destroy')).toEqual([])
     expect(kinds("psql -c 'DROP TABLE users'")).toEqual([])
   })
@@ -184,6 +197,66 @@ describe('exhibits', () => {
     expect(isSameMaterial({ behind: 0 }, { behind: 0 })).toBe(true)
     expect(isSameMaterial({ tracked: { a: false } }, { tracked: { a: false } })).toBe(true)
     expect(isSameMaterial({}, { tracked: { a: false } })).toBe(false)
+  })
+
+  test('a push is read for the branch it names, by name, and only in the one form that names it exactly', () => {
+    const argsOf = (command: string) => planOf(command).map(subcommandOf)
+    expect(argsOf('git push --force origin main')).toEqual([
+      ['rev-parse', '--is-inside-work-tree'],
+      ['rev-list', '--count', '--end-of-options', 'main..origin/main'],
+      ['log', '-20', '--no-show-signature', '--format=%ae', '--end-of-options', 'main..origin/main'],
+    ])
+    expect(argsOf('git push -f origin release/1.2')[1]).toEqual(['rev-list', '--count', '--end-of-options', 'release/1.2..origin/release/1.2'])
+    for (const command of [
+      'git push --force',
+      'git push -f',
+      'git push --force origin',
+      'git push --force origin HEAD:main',
+      'git push --force origin feature:main',
+      'git push --force origin +main',
+      'git push --force origin main dev',
+      'git push --force --all origin',
+      'git push --force --tags origin main',
+      'git push --force -u origin main',
+      'git push --force origin ../main',
+      'git push --force origin main..x',
+      'git push --force origin -main',
+      'git -C ../other push --force origin main',
+      'git --no-pager push -f main',
+    ]) {
+      expect(planOf(command), command).toEqual([])
+    }
+  })
+
+  test('a target the shell would read differently, or a line run elsewhere, gets no exhibit at all', () => {
+    for (const command of [
+      'rm -rf "build" src',
+      'rm -rf build\\ src',
+      'rm -rf ~/x',
+      'rm -rf $HOME',
+      'rm -rf {dist,src}',
+      'rm -rf src/*',
+      'cd app && rm -rf build',
+      'git -C ../other clean -fdx',
+      'git -C ../other reset --hard',
+    ]) {
+      expect(planOf(command), command).toEqual([])
+    }
+    expect(planOf('rm -rf a b c d').map(query => query.kind)).toEqual(['inside'])
+    expect(planOf('rm -rf build/').map(query => query.kind)).toEqual(['inside'])
+    expect(planOf('rm -rf -- -x').map(query => query.target)).toEqual([undefined, '-x', '-x'])
+    expect(planOf('rm -rf node_modules').map(query => query.kind)).toEqual(['inside', 'tracked', 'untracked'])
+  })
+
+  test('one unread target removes every target fact', () => {
+    const plan = planOf('rm -rf a b')
+    expect(factsOf(plan, [ran(0, 'true\n'), ran(0, 'a\n'), ran(0, ''), ran(128), ran(0, '')])).toEqual({ isRepo: true })
+    expect(factsOf(plan, [ran(0, 'true\n'), ran(0, 'a\n'), ran(0, ''), ran(1), undefined])).toEqual({ isRepo: true })
+    expect(factsOf(plan, [ran(0, 'true\n'), ran(0, 'a\n'), ran(0, ''), ran(1), ran(0, 'b/x\n')])).toEqual({
+      isRepo: true,
+      tracked: { a: true, b: false },
+      untracked: { a: 0, b: 1 },
+    })
   })
 })
 
