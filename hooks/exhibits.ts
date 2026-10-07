@@ -313,10 +313,12 @@ export const exhibitLinesOf = (facts: Facts): string[] => {
     )
   }
   if (facts.ahead !== undefined) {
+    // uncommitted changes go unread: every git that reads them can run the
+    // repository's own filters, so the line says so rather than reassure
     said.push(
       facts.ahead === 0
-        ? 'every local commit is on the upstream branch.'
-        : `${plural(facts.ahead, 'local commit is', 'local commits are')} not on the upstream branch.`,
+        ? 'every local commit is on the upstream branch; uncommitted changes were not checked.'
+        : `${plural(facts.ahead, 'local commit is', 'local commits are')} not on the upstream branch; uncommitted changes were not checked.`,
     )
   }
   for (const [target, isTracked] of Object.entries(facts.tracked ?? {})) {

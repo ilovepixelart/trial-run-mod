@@ -51,7 +51,7 @@ Before counsel speaks, the court reads a few facts from git in the directory the
 | Charge | What git is asked |
 | --- | --- |
 | force push naming one remote and one branch (`git push --force origin main`) | `git rev-list --count --end-of-options refs/heads/main..refs/remotes/origin/main`: the commits on the remote's copy of that branch that it lacks; `git log -20 --no-show-signature --format=%ae --end-of-options refs/heads/main..refs/remotes/origin/main`: how many distinct authors wrote them (up to 20; the addresses are counted on this machine, never shown or sent); `git config --get-regexp '^remote\.origin\.(push\|mirror)$'`: if the remote's config rewrites or mirrors pushes, the push is not described. Any other push (no branch, `HEAD`, a `src:dst` or `+` refspec, several branches, another option) gets none |
-| hard reset | `git rev-list --count @{upstream}..HEAD`: the local commits not on the upstream branch |
+| hard reset | `git rev-list --count @{upstream}..HEAD`: the local commits not on the upstream branch. Uncommitted changes are not read (every git command that reads them can run the repository's own filters), and the exhibit says they were not checked |
 | recursive delete with `rm` of 1 to 3 paths, none ending in `/` | for each path: `git ls-files --error-unmatch -- <path>` (tracked or not) and `git ls-files --others --exclude-standard -- <path>` (how many untracked files under it); if any path cannot be read, no path is reported |
 | git clean | `git ls-files --others --exclude-standard`, plus `--ignored` when `-x` or `-X` is given |
 

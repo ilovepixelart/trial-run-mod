@@ -157,8 +157,13 @@ describe('exhibits', () => {
     expect(exhibitLinesOf({ isRepo: true, behind: 0, upstreamAuthors: 1 })).toEqual([
       'Exhibit A: the upstream branch has no commits this branch lacks.',
     ])
+    // git cannot read uncommitted changes without running the repository's own
+    // filters, so a reset's exhibit says it did not look, never reassures alone
     expect(exhibitLinesOf({ isRepo: true, ahead: 2 })).toEqual([
-      'Exhibit A: 2 local commits are not on the upstream branch.',
+      'Exhibit A: 2 local commits are not on the upstream branch; uncommitted changes were not checked.',
+    ])
+    expect(exhibitLinesOf({ isRepo: true, ahead: 0 })).toEqual([
+      'Exhibit A: every local commit is on the upstream branch; uncommitted changes were not checked.',
     ])
     expect(exhibitLinesOf({ isRepo: true, tracked: { src: true, 'tmp\u0007x': false }, untracked: { src: 0, 'tmp\u0007x': 4 } })).toEqual([
       'Exhibit A: src is tracked by git, so history keeps it.',
