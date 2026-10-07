@@ -7,6 +7,8 @@ import { chargedOf, isSimpleCommand } from './risky'
  * programs git runs on its behalf; these turn off the ones the allowlisted
  * commands could reach: the filesystem monitor (`ls-files` runs it), hooks,
  * the untracked cache, signature verification in `log`, and the pager.
+ * `--literal-pathspecs` reads every path as written: without it `:src` or
+ * `:/src` names `src`, not the path `rm` deletes.
  * `status` and `diff` are not on the allowlist at all: they run a
  * repository's clean filters and external diff, which no flag here turns
  * off. `tests/hostile/git.hostile.mjs` runs every plan against such a
@@ -17,6 +19,7 @@ export const GIT_HARDENING = [
   '-c', 'core.hooksPath=/dev/null',
   '-c', 'core.untrackedCache=false',
   '-c', 'log.showSignature=false',
+  '--literal-pathspecs',
   '--no-optional-locks',
   '--no-pager',
 ] as const

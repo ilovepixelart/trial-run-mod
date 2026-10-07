@@ -259,3 +259,52 @@ test('in a linked worktree the index read is the worktree\'s own', () => {
   assert.deepEqual(facts.indexed?.src?.map(entry => entry.path), ['src/a.txt'])
 })
 
+/**
+ * The court's reads for one `rm` target: the plan for a placeholder with the
+ * target put in its place, so a target the plan refuses is still read with
+ * the argv it would get.
+ */
+const readsOf = target =>
+  planOf('rm -rf placeholder')
+    .filter(query => query.target === 'placeholder' && (query.kind === 'tracked' || query.kind === 'untracked'))
+    .map(query => ({ ...query, argv: query.argv.map(word => (word === 'placeholder' ? target : word)), target }))
+
+const runReads = (repo, target) =>
+  readsOf(target).map(query => {
+    const ran = spawnSync(query.argv[0], query.argv.slice(1), {
+      cwd: repo,
+      env: { ...process.env, ...GIT_ENV },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      encoding: 'utf8',
+      timeout: 10_000,
+    })
+    return { kind: query.kind, status: ran.status, stdout: ran.stdout.trim() }
+  })
+
+test('a target spelled as pathspec magic is read as the path rm deletes', () => {
+  const repo = join(root, 'magic')
+  mkdirSync(join(repo, 'src'), { recursive: true })
+  git(root, 'init', '-q', '-b', 'main', repo)
+  writeFileSync(join(repo, 'a.txt'), 'a\n')
+  writeFileSync(join(repo, 'src', 'b.txt'), 'b\n')
+  git(repo, 'add', '--', '.')
+  git(repo, '-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-q', '-m', 'one')
+  const magic = [':src', ':(glob)*', ':!src', ':/src']
+  for (const target of magic) {
+    mkdirSync(join(repo, target), { recursive: true })
+    writeFileSync(join(repo, target, 'x.txt'), 'x\n')
+  }
+  const planned = planOf('rm -rf :src').filter(query => query.target !== undefined)
+  assert.ok(planned.length > 0 && planned.every(query => query.target === ':src'))
+
+  for (const target of magic) {
+    assert.deepEqual(runReads(repo, target), [
+      { kind: 'tracked', status: 1, stdout: '' },
+      { kind: 'untracked', status: 0, stdout: `${target}/x.txt` },
+    ], target)
+  }
+  assert.deepEqual(runReads(repo, 'src'), [
+    { kind: 'tracked', status: 0, stdout: 'src/b.txt' },
+    { kind: 'untracked', status: 0, stdout: '' },
+  ])
+})
