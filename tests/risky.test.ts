@@ -1,6 +1,6 @@
 import { describe, expect, test, tier } from 'claude-code/testing'
 
-import { chargeOf, isSimpleCommand } from '../hooks/risky'
+import { chargeOf, chargedOf, isSimpleCommand } from '../hooks/risky'
 
 tier('user')
 
@@ -97,6 +97,77 @@ describe('risky', () => {
     }
   })
 
+  test('a charge respelled by path, escape or quotes is charged the same', () => {
+    const cases: readonly (readonly [string, string])[] = [
+      ['/bin/rm -rf src', 'recursive-delete'],
+      ['\\rm -rf src', 'recursive-delete'],
+      ['r\\m -rf src', 'recursive-delete'],
+      ['r""m -rf src', 'recursive-delete'],
+      ["r''m -rf src", 'recursive-delete'],
+      ['""rm -rf src', 'recursive-delete'],
+      ['"rm" -rf src', 'recursive-delete'],
+      ['"r"m -rf src', 'recursive-delete'],
+      ['"/bin/rm" -rf src', 'recursive-delete'],
+      ['/usr/bin/find . -delete', 'recursive-delete'],
+      ['/usr/bin/git push --force', 'force-push'],
+      ['\\git reset --hard', 'hard-reset'],
+      ['g""it clean -fdx', 'git-clean'],
+      ['/opt/homebrew/bin/psql -c "DROP TABLE users"', 'drop-table'],
+      ['/usr/local/bin/kubectl delete pod web', 'kubectl-delete'],
+      ["'terraform' destroy", 'terraform-destroy'],
+    ]
+    for (const [command, id] of cases) {
+      expect(chargeOf(command)?.id, command).toBe(id)
+    }
+  })
+
+  test('a respelled charge is matched on the plain name and read out as written', () => {
+    expect(chargedOf('/bin/rm -rf src')?.words).toEqual(['rm', '-rf', 'src'])
+    expect(chargedOf('r""m -rf src')?.words).toEqual(['rm', '-rf', 'src'])
+    expect(chargeOf('/bin/rm -rf src')?.command).toBe('/bin/rm -rf src')
+  })
+
+  test('prefixes, their options and their operands do not hide a charge', () => {
+    for (const command of [
+      'command rm -rf src',
+      'builtin command rm -rf src',
+      'env -i PATH=/bin rm -rf src',
+      'env -u HOME rm -rf src',
+      '/usr/bin/env git push --force',
+      'nice -n 10 rm -rf src',
+      'nohup rm -rf src',
+      'time -p rm -rf src',
+      'exec -a cleaner rm -rf src',
+      'sudo -u root rm -rf src',
+      'sudo -E -u root rm -rf src',
+      '/usr/bin/sudo rm -rf src',
+      '\\sudo rm -rf src',
+      'ls | xargs -n 1 rm -rf',
+    ]) {
+      expect(chargeOf(command)?.id, command).toBeDefined()
+    }
+  })
+
+  test('a command whose name only starts or mentions a charged one is not charged', () => {
+    for (const command of [
+      'rmdir x',
+      'rmdir -p a/b',
+      '/usr/bin/rmdir -p a/b',
+      'r""mdir -p a/b',
+      'echo rm -rf src',
+      '/bin/echo rm -rf src',
+      'grep rm file',
+      'grep -r rm src',
+      'command -v rm',
+      'nice -n 10 ls -R',
+      '/bin/ls -R src',
+      '"rm" file.txt',
+      'gitk --all',
+    ]) {
+      expect(chargeOf(command), command).toBeUndefined()
+    }
+  })
+
   test('ordinary commands are not charged', () => {
     for (const command of [
       'ls -la',
@@ -119,7 +190,7 @@ describe('risky', () => {
   })
 
   test('a simple command line is one command of plain words, and nothing else is', () => {
-    for (const command of ['rm -rf node_modules', '  rm  -fr  dist ', 'git push --force origin main', 'git push origin +main', 'rm -rf -- -rf', 'find . -name x.log -delete', 'git reset --hard HEAD~3']) {
+    for (const command of ['rm -rf node_modules', '  rm  -fr  dist ', 'git push --force origin main', 'git push origin +main', 'rm -rf -- -rf', 'find . -name x.log -delete', 'git reset --hard HEAD~3', '/bin/rm -rf node_modules']) {
       expect(isSimpleCommand(command), command).toBe(true)
     }
     for (const command of [
@@ -147,6 +218,10 @@ describe('risky', () => {
       'rm -rf node_modules # comment',
       'rm\t-rf node_modules',
       'sudo rm -rf node_modules',
+      '/usr/bin/sudo rm -rf node_modules',
+      '/usr/bin/env rm -rf node_modules',
+      '/usr/bin/xargs rm -rf',
+      '/bin/bash -c rm',
       'env rm -rf node_modules',
       'xargs rm -rf',
       'FOO=1 rm -rf node_modules',

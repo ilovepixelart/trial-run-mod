@@ -100,11 +100,28 @@ export const RULES: readonly Rule[] = [
   },
 ]
 
-const WRAPPERS = new Set(['sudo', 'env', 'nice', 'time', 'command', 'exec', 'nohup', 'xargs'])
+const WRAPPERS = new Set(['sudo', 'env', 'nice', 'time', 'command', 'builtin', 'exec', 'nohup', 'xargs'])
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash'])
 
+/**
+ * A wrapper's options that take the next word as their value, so that word
+ * is not read as the command (`nice -n 10 rm`, `sudo -u root rm`).
+ */
+const WRAPPER_VALUES = new Map<string, readonly string[]>([
+  ['sudo', ['-u', '-g', '-h', '-p', '-C', '-D', '-r', '-t', '-U', '-T']],
+  ['env', ['-u', '-C']],
+  ['nice', ['-n']],
+  ['time', ['-f', '-o']],
+  ['exec', ['-a']],
+  ['xargs', ['-I', '-n', '-L', '-P', '-s', '-d', '-E', '-a']],
+])
+
+/**
+ * The words of a segment, a quoted part joined to what it touches as the
+ * shell joins it (`""rm` and `"r"m` are one word).
+ */
 const wordsOf = (segment: string): string[] =>
-  segment.match(/"[^"]*"|'[^']*'|\S+/g) ?? []
+  segment.match(/(?:"[^"]*"|'[^']*'|\S)+/g) ?? []
 
 const unquoted = (word: string) => word.replace(/^(["'])([\s\S]*)\1$/, '$2')
 
@@ -114,6 +131,16 @@ const unquoted = (word: string) => word.replace(/^(["'])([\s\S]*)\1$/, '$2')
  * `git reset --hard'`) dropped, so the halves still match a charge.
  */
 const bare = (word: string) => unquoted(word).replace(/^["']|["']$/g, '')
+
+/**
+ * The name a command word runs, however it is spelled: quotes (`r""m`,
+ * `"rm"`) and escapes (`\\rm`) dropped, and a path (`/bin/rm`) read as its
+ * last part.
+ */
+const nameOf = (word: string) => {
+  const name = word.replace(/["']/g, '').replace(/\\/g, '')
+  return name.slice(name.lastIndexOf('/') + 1)
+}
 
 /**
  * Splits a command line into simple commands at `&&`, `||`, `;`, `|` and
@@ -149,17 +176,22 @@ const spellingOf = (segment: string) => {
 const commandsOf = (segment: string, depth = 0): Simple[] => {
   const words = wordsOf(segment.trim())
   let at = 0
+  let wrapper: string | undefined
   while (at < words.length) {
     const word = words[at] ?? ''
-    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(word) || WRAPPERS.has(word)) {
+    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(word)) {
       at += 1
-    } else if (at > 0 && WRAPPERS.has(words[at - 1] ?? '') && word.startsWith('-')) {
+    } else if (WRAPPERS.has(nameOf(word))) {
+      wrapper = nameOf(word)
       at += 1
+    } else if (wrapper !== undefined && word.startsWith('-')) {
+      at += WRAPPER_VALUES.get(wrapper)?.includes(word) ? 2 : 1
     } else {
       break
     }
   }
-  const rest = words.slice(at)
+  const [head, ...args] = words.slice(at)
+  const rest = head === undefined ? [] : [nameOf(head), ...args]
   const inner = innerScriptOf(rest)
   if (inner !== undefined && depth < 3) {
     return segmentsOf(inner).flatMap(part => commandsOf(part, depth + 1))
@@ -207,7 +239,7 @@ export const isSimpleCommand = (command: string): boolean => {
     !TILDE.test(command) &&
     head !== undefined &&
     !head.includes('=') &&
-    !NOT_SIMPLE_HEADS.has(head)
+    !NOT_SIMPLE_HEADS.has(nameOf(head))
   )
 }
 

@@ -150,6 +150,7 @@ describe('docket', () => {
       expect(precedentOf([heard(1, 'acquitted')], sought)?.number).toBe(1)
       expect(precedentOf([heard(1, 'acquitted')], { ...sought, command: 'rm  -fr dist' })?.number).toBe(1)
       expect(precedentOf([heard(1, 'acquitted')], { ...sought, command: 'rm -rf build' })).toBeUndefined()
+      expect(precedentOf([heard(1, 'acquitted')], { ...sought, command: '/bin/rm -rf dist' })?.number).toBe(1)
     })
 
     test('precedent is per project', () => {

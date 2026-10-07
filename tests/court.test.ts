@@ -307,6 +307,21 @@ describe('court', () => {
     expect(seen.calls.length).toBe(callsAfterTrial)
   })
 
+  test('a conviction retried under another spelling is contempt', async ($, on) => {
+    mock.clock(on)
+    mock.store(on)
+    const seen = seatCourt(on, verdictBench(GUILTY))
+
+    await $.tool.check(check('rm -rf src'))
+    const callsAfterTrial = seen.calls.length
+
+    for (const command of ['/bin/rm -rf src', '\\rm -rf src', 'r""m -rf src', 'command rm -rf src']) {
+      const retried = await $.tool.check(check(command))
+      expect(retried.reason, command).toMatch(/^Contempt of court!.*case #0001/)
+    }
+    expect(seen.calls.length).toBe(callsAfterTrial)
+  })
+
   test('contempt is stamped CONTEMPT in the guilty colour and filed as contempt', async ($, on) => {
     const clock = mock.clock(on)
     mock.store(on)
