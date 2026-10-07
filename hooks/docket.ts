@@ -1,7 +1,7 @@
 import { contemptKeyOf } from './contempt'
 import { isSameMaterial } from './exhibits'
 import type { MaterialFacts } from './exhibits'
-import { isSimpleCommand } from './risky'
+import { isSimpleCommand, nameOf } from './risky'
 
 /**
  * One case the court has heard, as the docket keeps it.
@@ -120,11 +120,21 @@ const isRulingIn = (c: CaseRecord, root: string) =>
     : isConviction(c) && (c.root === undefined || c.root === root)
 
 /**
+ * Whether a command's name is spelled plainly, as no path, escape or quote:
+ * `./rm` may be a script of the same name, so only a plain name acquits.
+ */
+const isPlainlyNamed = (command: string) => {
+  const head = command.trim().split(/\s+/)[0] ?? ''
+  return head === nameOf(head)
+}
+
+/**
  * The acquittal that binds a command line as precedent: the latest ruling
  * (guilty, acquitted or contempt) on the same simple command line in the
  * same project root, when it acquitted on the same facts that matter. A
  * conviction filed without a root counts as one in this root. A line that
- * is not one simple command never has precedent.
+ * is not one simple command, or names its command other than plainly,
+ * never has precedent.
  *
  * @param history the cases so far, oldest first
  * @param sought the whole command line, the project root and the facts now
@@ -133,7 +143,7 @@ export const precedentOf = (
   history: readonly CaseRecord[],
   sought: { command: string; root: string; facts: MaterialFacts },
 ): CaseRecord | undefined => {
-  if (!isSimpleCommand(sought.command)) {
+  if (!isSimpleCommand(sought.command) || !isPlainlyNamed(sought.command)) {
     return undefined
   }
   const key = contemptKeyOf(sought.command)
@@ -141,7 +151,7 @@ export const precedentOf = (
     c =>
       isRulingIn(c, sought.root) && contemptKeyOf(c.command) === key,
   )
-  return last?.verdict === 'acquitted' && isSameMaterial(last.facts ?? {}, sought.facts) ? last : undefined
+  return last?.verdict === 'acquitted' && isPlainlyNamed(last.command) && isSameMaterial(last.facts ?? {}, sought.facts) ? last : undefined
 }
 
 /**

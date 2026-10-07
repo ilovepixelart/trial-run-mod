@@ -137,7 +137,7 @@ const bare = (word: string) => unquoted(word).replace(/^["']|["']$/g, '')
  * `"rm"`) and escapes (`\\rm`) dropped, and a path (`/bin/rm`) read as its
  * last part.
  */
-const nameOf = (word: string) => {
+export const nameOf = (word: string) => {
   const name = word.replace(/["']/g, '').replace(/\\/g, '')
   return name.slice(name.lastIndexOf('/') + 1)
 }

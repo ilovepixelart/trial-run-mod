@@ -150,7 +150,19 @@ describe('docket', () => {
       expect(precedentOf([heard(1, 'acquitted')], sought)?.number).toBe(1)
       expect(precedentOf([heard(1, 'acquitted')], { ...sought, command: 'rm  -fr dist' })?.number).toBe(1)
       expect(precedentOf([heard(1, 'acquitted')], { ...sought, command: 'rm -rf build' })).toBeUndefined()
-      expect(precedentOf([heard(1, 'acquitted')], { ...sought, command: '/bin/rm -rf dist' })?.number).toBe(1)
+    })
+
+    test('only a plainly spelled command name sets or follows precedent', () => {
+      expect(precedentOf([heard(1, 'acquitted')], sought)?.number).toBe(1)
+      for (const command of ['./rm -rf dist', '/bin/rm -rf dist']) {
+        expect(precedentOf([heard(1, 'acquitted')], { ...sought, command }), command).toBeUndefined()
+        expect(precedentOf([heard(1, 'acquitted', { command })], { ...sought, command }), command).toBeUndefined()
+      }
+      expect(precedentOf([heard(1, 'acquitted', { command: '/bin/rm -rf dist' })], sought)).toBeUndefined()
+    })
+
+    test('a later conviction under another spelling still overturns an acquittal', () => {
+      expect(precedentOf([heard(1, 'acquitted'), heard(2, 'guilty', { command: '/bin/rm -rf dist' })], sought)).toBeUndefined()
     })
 
     test('precedent is per project', () => {
