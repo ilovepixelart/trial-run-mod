@@ -102,7 +102,7 @@ It is theatre on top of your permission rules. Matching is by spelling and best 
 - **Sound:** the gavel (`sounds/gavel.wav`) and the spoken verdict play through `afplay` and `say` on macOS; elsewhere the court is silent.
 - **Everything it calls,** as `claude plugin validate .` reports: `$.audio.play`, `$.audio.speak`, `$.clock.after`, `$.clock.sleep`, `$.command.register`, `$.model.complete`, `$.session.messages`, `$.state`, `$.store`, `$.ui.open`, `$.ui.resolve`. The animations run in two surface modules (`hooks/clients/`) on the drawing's own frame clock.
 
-No file system, process or network access.
+No file system, process or network access. [PRIVACY.md](PRIVACY.md) lists exactly what is sent to the model and what is kept, and how to delete it.
 
 ## Development
 
