@@ -1,0 +1,67 @@
+name: release
+
+# A tag created by `claude plugin tag --push` (trial-run--v<version>) runs
+# every gate again on the tagged commit, then publishes a GitHub Release with
+# the CHANGELOG section as notes and a zip of the plugin for --plugin-url.
+on:
+  push:
+    tags:
+      - 'trial-run--v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Claude Code
+        run: |
+          curl -fsSL https://claude.ai/install.sh | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Claude Code version
+        run: claude --version
+
+      - name: Release check
+        run: node scripts/check-release.mjs --tag "$GITHUB_REF_NAME"
+
+      - name: Validate
+        run: claude plugin validate --strict .
+
+      - name: Test
+        run: claude plugin test .
+
+      # See ci.yml: the plugin load writes the types, then stops at the login check.
+      - name: Write type declarations
+        run: |
+          claude --plugin-dir . -p ping || true
+          test -f .claude-plugin/types/claude-code/index.d.ts
+
+      - name: Typecheck
+        run: npx -y -p typescript tsc -p .
+
+      - name: Build the plugin zip
+        run: |
+          version=$(node -p "require('./.claude-plugin/plugin.json').version")
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          git archive --format=zip --prefix=trial-run/ -o "trial-run-$version.zip" HEAD
+          sha256sum "trial-run-$version.zip"
+
+      - name: Release notes
+        run: node scripts/check-release.mjs --notes > notes.md
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "trial-run-$VERSION.zip" \
+            --verify-tag \
+            --title "trial-run $VERSION" \
+            --notes-file notes.md
