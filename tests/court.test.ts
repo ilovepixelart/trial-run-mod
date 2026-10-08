@@ -1385,6 +1385,19 @@ describe('spinner', () => {
     }
   })
 
+  test('a court that fails after a guilty ruling stops deliberating', async ($, on) => {
+    seatCourt(on, {
+      ...verdictBench(GUILTY),
+      beneath: () => {
+        throw new Error('the rules are gone')
+      },
+    })
+    on('ui.render', { component: 'Spinner' }, ($, e) => ({ type: 'Text', props: {}, children: [e.props.word] }) as never)
+
+    expect((await $.tool.check(check('rm -rf ~'))).decision).toBe('ask')
+    expect(await spinnerOf($, 'terminal')).toBe('Sauteing')
+  })
+
   test('an ordinary command and contempt leave the spinner alone', async ($, on) => {
     seatCourt(on, verdictBench(GUILTY))
     on('ui.render', { component: 'Spinner' }, ($, e) => ({ type: 'Text', props: {}, children: [e.props.word] }) as never)
@@ -1484,6 +1497,20 @@ describe('adjournment', () => {
     expect(await $.turn.complete(turnEnd({ isAborted: true, reason: 'aborted' }))).toEqual({ text: 'Done.' })
 
     expect(await $.turn.complete(turnEnd({ turnId: 'turn-2' }))).toEqual({ text: 'Done.' })
+  })
+
+  test('a court that fails after a guilty ruling counts no conviction', async ($, on) => {
+    seatCourt(on, {
+      ...rulingsBench(GUILTY),
+      beneath: () => {
+        throw new Error('the rules are gone')
+      },
+    })
+    on('turn.complete', ($, e) => ({ text: e.answer }))
+
+    expect((await $.tool.check(check('rm -rf ~'))).decision).toBe('ask')
+
+    expect(await $.turn.complete(turnEnd())).toEqual({ text: 'Done.' })
   })
 
   test('a line another hook beneath added stays, with the adjournment under it', async ($, on) => {

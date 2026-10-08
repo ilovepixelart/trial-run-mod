@@ -134,6 +134,21 @@ describe('transcript', () => {
     expect(await row.drawn()).toEqual(ENGINE_ROW)
   })
 
+  test('a guilty ruling the rules beneath fail under asks the person and stamps no row', async ($, on) => {
+    memoryStore(on, SIXTEEN)
+    seatCourt(on, {
+      ...verdictBench(GUILTY),
+      beneath: () => {
+        throw new Error('the rules are gone')
+      },
+    })
+    drawsEngine(on)
+
+    expect((await $.tool.check(call('rm -rf ~', 'toolu_failed'))).decision).toBe('ask')
+    const row = await $.ui.mount({ ...resultRow('toolu_failed'), surface: 'terminal' })
+    expect(await row.drawn()).toEqual(ENGINE_ROW)
+  })
+
   test('another tool sharing a convicted id is untouched', async ($, on) => {
     memoryStore(on, SIXTEEN)
     seatCourt(on, verdictBench(GUILTY))

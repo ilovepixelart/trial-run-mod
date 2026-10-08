@@ -14,7 +14,7 @@ The trial is a `tool.check` hook on the Bash tool. It calls `next(e)` before the
 
 ## .catch: failing closed
 
-The `tool.check` hook is registered with `.catch`, whose handler is `failedCheckOf`: when the trial itself throws, the court asks the rules beneath again and returns their deny if they deny, otherwise `COURT_FAILED`, an `ask`. It never reads the command again, since reading it may be what failed. Inside the trial each step that can fail on its own (the exhibits, the store, the sounds, the pane) catches its own error and degrades to less evidence or a missing docket entry, so only a fault in the court itself reaches `.catch`. `claude plugin validate` lists which gating hooks carry one.
+The `tool.check` hook is registered with `.catch`, whose handler calls `failedCheckOf`: when the trial itself throws, the court asks the rules beneath again and returns their deny if they deny, otherwise `COURT_FAILED`, an `ask`. It never reads the command again, since reading it may be what failed. The handler also closes a trial left in session as a mistrial, so the spinner stops deliberating. A trial records a ruling (the row's stamp, the turn's count, the conviction contempt remembers) only once the rules beneath have answered, so a check that fails there records none of it. Inside the trial each step that can fail on its own (the exhibits, the store, the sounds, the pane) catches its own error and degrades to less evidence or a missing docket entry, so only a fault in the court itself reaches `.catch`. `claude plugin validate` lists which gating hooks carry one.
 
 ## Render sites and Client modules
 

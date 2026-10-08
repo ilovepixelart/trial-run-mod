@@ -652,15 +652,16 @@ export const register: Register = (on, options) => {
     ])
     timer.abort()
     objections.delete(id)
+    // the rules beneath can still fail the check: nothing is recorded until
+    // the decision exists
+    const penalty = ruling.kind === 'guilty' ? sentenceFor(charge.id, charge.command) : undefined
+    const sentence = sentenceOf(ruling, await beneath, charge.label, penalty)
     tally[ruling.kind] += 1
     if (ruling.kind === 'guilty') {
       convicted.set(contemptKey, opening.number)
       memory.appealable = { command, charge, key: contemptKey, number: opening.number }
       await stampRow($, e.tool_use_id, { kind: 'guilty', number: opening.number })
     }
-
-    const penalty = ruling.kind === 'guilty' ? sentenceFor(charge.id, charge.command) : undefined
-    const sentence = sentenceOf(ruling, await beneath, charge.label, penalty)
     const ruled = tightOf(spokenOf(ruling.reason))
     await update($, trialAtom, trial =>
       trial?.id === id
@@ -691,7 +692,16 @@ export const register: Register = (on, options) => {
       quietly($.audio.speak(SPOKEN[ruling.kind]))
     }
     return sentence
-  }).catch(($, e, next) => failedCheckOf(() => next(e)))
+  }).catch(async ($, e, next) => {
+    const failed = await failedCheckOf(() => next(e))
+    // a trial the failure left in session is closed, or the spinner deliberates on
+    await update($, trialAtom, trial =>
+      trial !== null && trial.verdict === null
+        ? { ...trial, verdict: { kind: 'hung' as const, reason: 'the court fell into disorder', decision: failed.decision }, shown: 5 }
+        : trial,
+    ).catch(() => undefined)
+    return failed
+  })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const els = $.ui.resolve(e)
