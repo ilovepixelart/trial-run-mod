@@ -405,6 +405,44 @@ const quotedAt = (line: string, at: number, scripts: string[]): (Word & { end: n
 }
 
 /**
+ * The work left to one reading of a command line, in steps: a character
+ * lexed, a word visited, and a fixed cost for each piece of the line
+ * entered (a segment, a nested script, the command piped into another).
+ */
+type Budget = { left: number }
+
+/**
+ * Thrown when a reading runs out of steps: the line is charged as unread.
+ */
+class OverBudget extends Error {}
+
+/**
+ * The fixed cost of lexing one piece of a line, in steps: about what lexing
+ * this many characters costs.
+ */
+const LEX_STEPS = 64
+
+/**
+ * The fixed cost of reading one group of words as a simple command, in
+ * steps, on top of its words.
+ */
+const SIMPLE_STEPS = 32
+
+/**
+ * The cost of reading one redirection operator, in steps.
+ */
+const REDIRECTION_STEPS = 12
+
+const spend = (budget: Budget, steps: number) => {
+  if (steps > budget.left) {
+    // one step past the budget marks a reading that ran out
+    budget.left = -1
+    throw new OverBudget()
+  }
+  budget.left -= steps
+}
+
+/**
  * The words of one segment as the shell reads them, with redirections and
  * their targets left out, the commands its substitutions run, where a `(`
  * or `)` opens or ends a group or a case pattern (`(x)`, `x)`, `f()`), as
@@ -413,7 +451,8 @@ const quotedAt = (line: string, at: number, scripts: string[]): (Word & { end: n
  * separator split inside quotes (`bash -c 'cd app` and `git reset --hard'`)
  * is dropped, so the halves still match a charge.
  */
-const lexOf = (line: string): { words: Word[]; scripts: string[]; breaks: number[]; input?: Input } => {
+const lexOf = (line: string, budget: Budget): { words: Word[]; scripts: string[]; breaks: number[]; input?: Input } => {
+  spend(budget, line.length + LEX_STEPS)
   const words: Word[] = []
   const scripts: string[] = []
   const breaks: number[] = []
@@ -438,6 +477,7 @@ const lexOf = (line: string): { words: Word[]; scripts: string[]; breaks: number
       add(part.text, part.exact)
       at = part.end
     } else if (redirection !== undefined) {
+      spend(budget, REDIRECTION_STEPS)
       if (word !== undefined && /^\d+$/.test(word.text)) word = undefined
       end()
       target = redirection.target
@@ -474,7 +514,7 @@ const programOf = (word: Word): string | undefined =>
  * itself when the shell only resolves it at run time.
  */
 export const nameOf = (word: string) => {
-  const [first] = lexOf(word).words
+  const [first] = lexOf(word, { left: Infinity }).words
   return (first === undefined ? undefined : programOf(first)) ?? word
 }
 
@@ -501,7 +541,7 @@ const HEREDOC = /^<<(-?)[ \t]*(?:'([^']*)'|"([^"]*)"|(\\?[^\s;&|<>()]+))/
  */
 const documentAt = (line: string, at: number): { newline: number; end: number; document: Document } | undefined => {
   const match = line[at - 1] === '<' ? null : HEREDOC.exec(line.slice(at))
-  const newline = line.indexOf('\n', at)
+  const newline = match === null ? -1 : line.indexOf('\n', at)
   if (match === null || match[0].startsWith('<<<') || newline === -1) {
     return undefined
   }
@@ -572,7 +612,8 @@ const shellSplitOf = (line: string): Part[] => {
  * it, then again at every separator, inside quotes too. The second reading
  * can only put more commands on trial, never fewer.
  */
-const segmentsOf = (command: string): Part[] => {
+const segmentsOf = (command: string, budget: Budget): Part[] => {
+  spend(budget, command.length)
   const line = command.replace(/\\\n/g, '')
   return [...shellSplitOf(line), ...line.split(/&&|\|\||(?<![<>|])&(?!>)|[;|\n]/).map(text => ({ text }))]
 }
@@ -680,13 +721,21 @@ const commandStartOf = (words: readonly Word[]): { at: number; script?: string }
  * it is matched on; for `bash -c '...'`, `eval '...'` and `env -S '...'`, the
  * commands inside instead; and the commands its substitutions run.
  */
-const commandsOf = (part: Part, depth = 0): Simple[] => {
+const commandsOf = (part: Part, budget: Budget, depth = 0): Simple[] => {
   const nested = (script: string) =>
-    depth < 3 ? segmentsOf(script).flatMap(inner => commandsOf(inner, depth + 1)) : []
-  const { words, scripts, breaks, input } = lexOf(part.text.trim())
+    depth < 3 ? segmentsOf(script, budget).flatMap(inner => commandsOf(inner, budget, depth + 1)) : []
+  const { words, scripts, breaks, input } = lexOf(part.text.trim(), budget)
   const ends = [...breaks, words.length]
   const groups = [0, ...breaks].map((from, index) => words.slice(from, ends[index]))
-  const context: Context = { part, input, nested, spelling: spellingOf(part.text), read: once(() => inputOf(part, input)), unread: once(() => unreadOf(part, input)) }
+  const context: Context = {
+    part,
+    input,
+    nested,
+    spelling: spellingOf(part.text),
+    budget,
+    read: once(() => inputOf(part, input, budget)),
+    unread: once(() => unreadOf(part, input)),
+  }
   return [...groups.flatMap(group => simpleOf(group, context)), ...scripts.flatMap(nested)]
 }
 
@@ -709,15 +758,24 @@ type Context = {
   input: Input | undefined
   nested: (script: string) => Simple[]
   spelling: string
+  budget: Budget
   read: () => ReturnType<typeof inputOf>
   unread: () => Simple
 }
 
 /**
- * The simple command of one group of words, or the commands of the script
- * it runs, with those of a script it reads on its input.
+ * How deep a `find -exec` reads the finds it runs (`find -exec find -exec
+ * ...`); a deeper one is charged as an unread script.
  */
-const simpleOf = (words: readonly Word[], context: Context): Simple[] => {
+const FIND_DEPTH = 3
+
+/**
+ * The simple command of one group of words, or the commands of the script
+ * it runs, with those of a script it reads on its input and of the
+ * commands a find runs for each file.
+ */
+const simpleOf = (words: readonly Word[], context: Context, finds = 0): Simple[] => {
+  spend(context.budget, words.length + SIMPLE_STEPS)
   const start = commandStartOf(words)
   const [head, ...args] = words.slice(start.at)
   const program = head === undefined ? undefined : programOf(head)
@@ -727,7 +785,10 @@ const simpleOf = (words: readonly Word[], context: Context): Simple[] => {
   const own = inner === undefined ? [{ words: rest, open, text: context.spelling }] : context.nested(inner)
   const fed = inner === undefined ? fedOf(rest, context) : []
   const perFile = program === 'find' ? execsOf(args) : []
-  return [...own, ...fed, ...perFile.flatMap(command => simpleOf(command, context).map(simple => ({ ...simple, whole: rest })))]
+  if (perFile.length > 0 && finds >= FIND_DEPTH) {
+    return [...own, ...fed, context.unread()]
+  }
+  return [...own, ...fed, ...perFile.flatMap(command => simpleOf(command, context, finds + 1).map(simple => ({ ...simple, whole: rest })))]
 }
 
 /**
@@ -735,7 +796,7 @@ const simpleOf = (words: readonly Word[], context: Context): Simple[] => {
  * here-document, or the segment piped into it; `unread` for a file or
  * anything else the line does not spell; undefined for no input.
  */
-const inputOf = (part: Part, input: Input | undefined): { script: string; exact: boolean } | 'unread' | undefined => {
+const inputOf = (part: Part, input: Input | undefined, budget: Budget): { script: string; exact: boolean } | 'unread' | undefined => {
   if (input?.kind === 'string') {
     return { script: input.word.text, exact: input.word.exact }
   }
@@ -746,7 +807,7 @@ const inputOf = (part: Part, input: Input | undefined): { script: string; exact:
   if (input?.kind === 'file') {
     return 'unread'
   }
-  return part.from === undefined ? undefined : outputOf(part.from)
+  return part.from === undefined ? undefined : outputOf(part.from, budget)
 }
 
 /**
@@ -754,8 +815,8 @@ const inputOf = (part: Part, input: Input | undefined): { script: string; exact:
  * `echo` or `printf` (`\n` read as a new line), or the input `cat` passes
  * on; `unread` for any other program.
  */
-const outputOf = (part: Part): ReturnType<typeof inputOf> => {
-  const { words, input } = lexOf(part.text.trim())
+const outputOf = (part: Part, budget: Budget): ReturnType<typeof inputOf> => {
+  const { words, input } = lexOf(part.text.trim(), budget)
   const [head, ...args] = words.slice(commandStartOf(words).at)
   const program = head === undefined ? undefined : programOf(head)
   if (program === 'echo' || program === 'printf') {
@@ -764,7 +825,7 @@ const outputOf = (part: Part): ReturnType<typeof inputOf> => {
     const script = shown.map(word => word.text).join(program === 'echo' ? ' ' : '\n').replaceAll('\\n', '\n')
     return { script, exact: shown.every(word => word.exact) }
   }
-  return program === 'cat' && args.every(word => word.text.startsWith('-')) ? inputOf(part, input) : 'unread'
+  return program === 'cat' && args.every(word => word.text.startsWith('-')) ? inputOf(part, input, budget) : 'unread'
 }
 
 /**
@@ -980,26 +1041,64 @@ export const chargedOf = (command: string): { charge: Charge; words: readonly st
 }
 
 /**
- * The longest command line the court reads, in characters. Reading is
- * linear in the length but costs about 15 ms per Ki characters at worst
- * (a run of backticks or `;`), so a line this long takes up to a second
- * in the tool.check hook; a longer one is charged as unread, not read. A
+ * The longest command line the court reads, in characters; a longer one is
+ * charged as unread, not read. Reading is not linear in the length: nested
+ * scripts, `find -exec` and pipes read parts of the line again, so the
+ * time a reading may take is bounded by `BUDGET`, not by this cap. A
  * `bash -c` script cannot exceed 128 KiB on Linux (MAX_ARG_STRLEN), and
  * a command line written by hand or by the model is far shorter.
  */
 const MAX_LINE = 64 * 1024
 
 /**
+ * The steps one reading of a command line may take; past them the line is
+ * charged as unread. At this budget the slowest line measured (a nested
+ * `find -exec`, `eval`, `case` or `{` run at 64 Ki characters) reads in
+ * about 50 ms in the plugin runtime, and a 64 Ki here-document or script of
+ * real code in at most 32 ms and about 570 000 steps. A 64 Ki shell script
+ * fed to `bash` takes 0.9 to 1.1 million and goes to trial unread.
+ */
+export const BUDGET = 600_000
+
+type Trial = { charge: Charge; words: readonly string[]; matched: readonly string[] } | undefined
+
+/**
+ * The steps the last reading of a command line took: one past `BUDGET` for
+ * a reading that ran out, none for a line too long to read.
+ */
+export const readings = { steps: 0 }
+
+/**
+ * A line charged as unread, not read: too long, or past the budget.
+ */
+const unreadLineOf = (command: string): Trial => {
+  const words = command.trim().split(/\s+/)
+  return { charge: { ...UNREAD, command }, words, matched: words }
+}
+
+/**
  * The charge, the words that stand for the charged command, and the words
  * the charge was matched on (those of the command run per file, for a
  * `find -exec`).
  */
-const trialOf = (command: string): { charge: Charge; words: readonly string[]; matched: readonly string[] } | undefined => {
+const trialOf = (command: string): Trial => {
   if (command.length > MAX_LINE) {
-    const words = command.trim().split(/\s+/)
-    return { charge: { ...UNREAD, command }, words, matched: words }
+    readings.steps = 0
+    return unreadLineOf(command)
   }
-  for (const { words, open, text, whole, unread } of segmentsOf(command).flatMap(segment => commandsOf(segment))) {
+  const budget: Budget = { left: BUDGET }
+  let commands: Simple[]
+  try {
+    commands = segmentsOf(command, budget).flatMap(segment => commandsOf(segment, budget))
+  } catch (error) {
+    if (error instanceof OverBudget) {
+      return unreadLineOf(command)
+    }
+    throw error
+  } finally {
+    readings.steps = BUDGET - budget.left
+  }
+  for (const { words, open, text, whole, unread } of commands) {
     if (unread === true) {
       return { charge: { ...UNREAD, command: text }, words, matched: words }
     }

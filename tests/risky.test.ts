@@ -1,24 +1,45 @@
 import { describe, expect, test, tier } from 'claude-code/testing'
 
-import { chargeOf, chargedOf, isSimpleCommand } from '../hooks/risky'
+import { BUDGET, chargeOf, chargedOf, isSimpleCommand, readings } from '../hooks/risky'
+import { ADVERSARIAL } from './fixtures/adversarial'
 
 tier('user')
 
 const run = (unit: string, length: number) => unit.repeat(Math.ceil(length / unit.length)).slice(0, length)
 
+const CAP = 64 * 1024
+
+const fill = (unit: string, tail: string, length: number) => unit.repeat(Math.floor((length - tail.length) / unit.length)) + tail
+
 /**
- * The fewest milliseconds of two readings of a command line, charge and
+ * The median milliseconds of five readings of a command line, charge and
  * simple check together.
  */
-const elapsedOf = (command: string) =>
-  Math.min(
-    ...[0, 1].map(() => {
-      const started = Date.now()
-      chargeOf(command)
-      isSimpleCommand(command)
-      return Date.now() - started
-    }),
-  )
+const elapsedOf = (command: string) => {
+  const times = [0, 1, 2, 3, 4].map(() => {
+    const started = performance.now()
+    chargeOf(command)
+    isSimpleCommand(command)
+    return performance.now() - started
+  })
+  return times.toSorted((a, b) => a - b)[2] ?? Infinity
+}
+
+/**
+ * A bound on the time of a reading, for the slowdowns the step budget does
+ * not count (a scan inside one piece of the line): far above what the
+ * linear reader takes (tens of milliseconds, on a loaded or slower machine
+ * too) and far below what the quadratic one took (seconds).
+ */
+const SLOW_MS = 1_500
+
+/**
+ * The steps a reading of a command line took.
+ */
+const stepsOf = (command: string) => {
+  chargeOf(command)
+  return readings.steps
+}
 
 describe('risky', () => {
   test('recursive deletes are charged', () => {
@@ -80,39 +101,39 @@ describe('risky', () => {
   })
 
   test('a drop with many SQL comments after it is read in time linear in its length', () => {
-    const command = `psql -c "drop ${'/**/ '.repeat(25)}x"`
-    const started = Date.now()
+    // the work once grew by a quarter with each comment, to about 2 s a
+    // drop at 35; four such drops took 8 s
+    const command = Array.from({ length: 4 }, () => `psql -c "drop ${'/**/ '.repeat(35)}x"`).join('; ')
+    const started = performance.now()
     expect(chargeOf(command)).toBeUndefined()
-    expect(Date.now() - started).toBeLessThan(100)
+    expect(performance.now() - started).toBeLessThan(SLOW_MS)
   })
 
-  // each was quadratic or worse in its length; sized so the old code took
-  // seconds and the linear one takes milliseconds
+  // each was quadratic or worse in its length; at the cap the old code
+  // took seconds and the linear one takes milliseconds
   const runs: readonly (readonly [string, string])[] = [
-    ['[', run('[', 32_000)],
-    ['{,', `{${run(',', 16_000)}`],
-    ['{..', `{${run('.', 16_000)}`],
-    ['(', run('(', 4_000)],
-    [')', run(')', 4_000)],
-    ['((', run('((', 4_000)],
-    ['echo -n', `echo ${run('-n ', 16_000)}| sh`],
-    ['echo words', `echo ${run('a ', 16_000)}| sh`],
-    ['sudo', `${run('sudo ', 32_000)}rm -rf x`],
-    ['xargs -I', `${run('xargs -I ', 32_000)}rm -rf x`],
-    ['shells reading a pipe', `cat x | ${run('(sh ', 8_000)}`],
+    ['[', run('[', CAP)],
+    ['{,', `{${run(',', CAP - 1)}`],
+    ['{..', `{${run('.', CAP - 1)}`],
+    ['(', run('(', CAP)],
+    [')', run(')', CAP)],
+    ['((', run('((', CAP)],
+    ['echo -n', `echo ${run('-n ', CAP - 10)}| sh`],
+    ['echo words', `echo ${run('a ', CAP - 10)}| sh`],
+    ['sudo', `${run('sudo ', CAP - 10)}rm -rf x`],
+    ['xargs -I', `${run('xargs -I ', CAP - 10)}rm -rf x`],
+    ['shells reading a pipe', `cat x | ${run('(sh ', CAP - 10)}`],
   ]
   for (const [name, command] of runs) {
     test(`a long run of ${name} is read in time linear in its length`, () => {
-      expect(elapsedOf(command)).toBeLessThan(100)
+      expect(elapsedOf(command)).toBeLessThan(SLOW_MS)
     })
   }
 
   test('a line of many here-documents is read in time linear in its length', () => {
     // each here-document once read the rest of the line: four times the
-    // here-documents took sixteen times as long
-    const short = run('cat <<a\na\n', 16_000)
-    const long = run('cat <<a\na\n', 64_000)
-    expect(elapsedOf(long)).toBeLessThan(8 * elapsedOf(short) + 50)
+    // here-documents took sixteen times as long, seconds at the cap
+    expect(elapsedOf(run('cat <<a\na\n', CAP))).toBeLessThan(SLOW_MS)
   })
 
   test('a command line longer than 64 Ki characters is charged as unread without being read', () => {
@@ -122,8 +143,51 @@ describe('risky', () => {
     expect(chargeOf(over)?.id).toBe('unread-script')
     expect(chargeOf(over)?.command === over).toBe(true)
     expect(isSimpleCommand(over)).toBe(false)
-    expect(elapsedOf(`${run('`a`', 64 * 1024)}x`)).toBeLessThan(100)
+    expect(stepsOf(`${run('`a`', 64 * 1024)}x`)).toBe(0)
   })
+
+  test('a find -exec nested to the 64 Ki cap is read within the budget, in time, and charged as unread', () => {
+    // each -exec read every word after it again: 40 Ki characters took
+    // seconds and wedged the hooks worker
+    const nested = fill('find -exec ', 'rm -rf src', CAP)
+    expect(nested.length).toBeLessThanOrEqual(CAP)
+    expect(stepsOf(nested)).toBeLessThanOrEqual(BUDGET + 1)
+    expect(elapsedOf(nested)).toBeLessThan(SLOW_MS)
+    expect(chargeOf(nested)?.id).toBe('unread-script')
+  })
+
+  test('a find -exec three finds deep is read, and a fourth find is charged as unread', () => {
+    const finds = (depth: number) => `${'find . -exec '.repeat(depth)}rm -rf {}${' \\;'.repeat(depth)}`
+    expect(chargeOf(finds(3))?.id).toBe('recursive-delete')
+    expect(chargeOf(finds(4))?.id).toBe('unread-script')
+  })
+
+  test('a line that takes more reading than the budget allows is charged as unread, whole', () => {
+    // 64 Ki empty commands: within the cap, charged nothing when read whole
+    const empty = run(';', CAP)
+    expect(stepsOf(empty)).toBe(BUDGET + 1)
+    expect(chargeOf(empty)).toEqual({ id: 'unread-script', label: 'unread script', command: empty })
+    expect(isSimpleCommand(empty)).toBe(false)
+  })
+
+  test('a 64 Ki here-document of real code is read whole, and the command after it charged', () => {
+    const code = run('const at = line.indexOf("x", 2) // a (b) [c] {d} \'g\'\n', CAP - 100)
+    const command = `cat > out.ts <<'EOF'\n${code}\nEOF\ngit push --force origin main`
+    expect(command.length).toBeLessThanOrEqual(CAP)
+    expect(stepsOf(command)).toBeLessThanOrEqual(BUDGET)
+    expect(chargeOf(command)).toEqual({ id: 'force-push', label: 'force push', command: 'git push --force origin main' })
+  })
+
+  for (const [name, make] of Object.entries(ADVERSARIAL)) {
+    test(`a line built to be slow to read (${name}) stays within the budget, and in time, at every length up to the cap`, () => {
+      for (const length of [1_000, 16 * 1024, CAP]) {
+        const command = make(length).slice(0, length)
+        // one step past the budget marks a reading that ran out
+        expect(stepsOf(command), `${name} at ${length}`).toBeLessThanOrEqual(BUDGET + 1)
+        expect(elapsedOf(command), `${name} at ${length}`).toBeLessThan(SLOW_MS)
+      }
+    })
+  }
 
   test('global flags before the subcommand do not hide a teardown', () => {
     const cases: readonly (readonly [string, string])[] = [
