@@ -56,7 +56,7 @@ The court doubles as a reference mod: each clause uses a mods capability the cou
 - **SHOW-003 Settings in /config.** `userConfig` in plugin.json declares: `strictness` (`lenient`, `fair`, `hanging`; default `fair`), `sounds` (boolean, default true), `charges` (multiple, default every charge). `register(on, options)` reads them; strictness changes the judge's doctrine sentence only, never the decision mapping (a model's acquittal can still only defer); a charge switched off is never tried. Check: `register.test.ts` per option, and `claude plugin validate --strict` passes with `userConfig`. **Built:** `register.test.ts` "settings": "by default every charge goes to trial", "a charge switched off is never tried", "a charge switched off does not hide another one on the same line", "no charge switched on tries nothing", "the fair court is the default doctrine", "a lenient court changes the judge's doctrine sentence and nothing else" (and hanging), "a lenient court keeps the decision mapping" (and hanging), "an acquittal by a lenient court still only hands back the rules", "a conviction by a lenient court still denies", "a strictness the court does not know is the fair court", "with sounds on, the gavel bangs and the verdict is spoken", "with sounds off, the court is silent, contempt included"; `charges` is a list field, which `/config` does not draw as a row.
 - **SHOW-004 Spinner.** A `ui.render` hook on the `Spinner` site shows the word `Deliberating` while a trial is in session, and leaves the spinner untouched otherwise. Check: `court.test.ts` "the spinner deliberates during a trial only". **Built:** `court.test.ts` "spinner": "the spinner deliberates during a trial only" (terminal and desktop, the other props unchanged) and "an ordinary command and contempt leave the spinner alone"; live: `✻ Deliberating…` during a trial on 2.1.294.
 - **SHOW-005 Adjournment.** A `turn.complete` hook adds one line under the answer when the turn held at least one trial: `Court adjourned. 1 conviction, 1 acquittal this turn.` No line for a turn without trials. Check: `court.test.ts` both cases. **Built:** `court.test.ts` "adjournment": "a turn that held trials ends with the adjournment line", "a turn without trials has no adjournment line", "each turn counts its own trials, contempt and mistrials included", "a subagent's turn adjourns nothing, and its trials are told when the main turn ends", "an aborted turn adjourns nothing, and its trials are not told later" and "a line another hook beneath added stays, with the adjournment under it"; `adjournment.test.ts` for the wording; live on 2.1.294: the line is drawn under the answer, and a subagent's `turn.complete` carried `agentId` and an interrupted one `isAborted: true`.
-- **SHOW-006 How it works.** `docs/how-it-works.md` explains each mods concept the court uses, why, and where in the code: the hooks module and `register(on, options)`; `tool.check` as middleware and why the court only tightens (`next(e)` first, then a stricter decision); `.catch` as the fail-closed path; render sites (`Pane`, `AbovePrompt`, `ToolResult`, `Spinner`) and `Client` modules for animation; `$.state` atoms declared in `types/index.d.ts`; `$.store` with its layout version; `$.model.complete`; `$.process.run` with an argv allowlist (exhibits); `userConfig`; tiers and how an organisation could seat the court with `prependPlugins`; testing with `claude plugin test` and the kit's mocks, and `claude plugin validate` as the access report. Pointers and constraints only, no pasted code beyond one-line signatures. Check: every symbol it names exists in the code (a grep per symbol, as REL-004 does for the README).
+- **SHOW-006 How it works.** `docs/how-it-works.md` explains each mods concept the court uses, why, and where in the code: the hooks module and `register(on, options)`; `tool.check` as middleware and why the court only tightens (`next(e)` first, then a stricter decision); `.catch` as the fail-closed path; render sites (`Pane`, `AbovePrompt`, `ToolResult`, `Spinner`) and `Client` modules for animation; `$.state` atoms declared in `types/index.d.ts`; `$.store` with its layout version; `$.model.complete`; `$.process.run` with an argv allowlist (exhibits); `userConfig`; tiers and how an organisation could seat the court in the managed `prepend` tier; testing with `claude plugin test` and the kit's mocks, and `claude plugin validate` as the access report. Pointers and constraints only, no pasted code beyond one-line signatures. Check: every symbol it names exists in the code (a grep per symbol, as REL-004 does for the README). **Built:** `scripts/check-guide.mjs`, run by `scripts/gates.mjs`, fails on a backticked symbol the guide names that is not in `hooks/`, `tests/` or the types, or a backticked path that does not exist.
 
 Technique, from the official mods docs:
 
@@ -66,39 +66,25 @@ Technique, from the official mods docs:
 
 ### Release
 
-- **REL-001** Version lives in `plugin.json` only; `marketplace.json` matches it; a test asserts they agree. Check: `release.test.ts`.
+- **REL-001** Version lives in `plugin.json` only; `marketplace.json` does not repeat it, and a release tag must name it. Check: `scripts/check-release.mjs` (`--tag trial-run--v0.1.0`), the first gate `scripts/gates.mjs` runs.
 - **REL-002** CHANGELOG.md with 0.1.0, the public surface listed: commands (`/court`, `/court docket`, `/court appeal`), charges, store keys, required Claude Code version. Check: review.
-- **REL-003** Byte scan finds no em or en dashes; no secrets, no `.env`, no generated files tracked (`.claude-plugin/types/` ignored). Check: `scratchpad/dash_scan.py`, `git status --ignored` review.
+- **REL-003** No secrets, no `.env`, no generated files tracked (`.claude-plugin/types/` ignored). Check: `.gitignore`, `git status --ignored` review.
 - **REL-004** README matches behaviour: every command, charge, access item and limitation in the code appears, and nothing absent from the code is claimed. Check: grep for each symbol, clause by clause.
-- **REL-005** Gates green as one chain: `claude plugin validate --strict .` && `claude plugin test .` && `npx -y -p typescript tsc -p .`; CI workflow green on GitHub on the pushed head SHA (after the owner approves the push).
-- **REL-006** Demo GIF recorded with no usage banner and no slash menu in any frame; every beat present. Check: frame sheet review.
-- **REL-007** Commits are small and logical, authored by the owner, no AI attribution; tag `trial-run--v0.1.0` via `claude plugin tag`. Check: `git log` review (only when the owner asks to commit).
+- **REL-005** Gates green as one chain: `node scripts/gates.mjs` runs the release check, `claude plugin validate --strict .`, `claude plugin test .`, the hostile git suite, the typecheck and the guide check in order and stops at the first that fails; CI and the release workflow run the same script, and CI is green on the pushed head SHA.
+- **REL-006** Demo GIF shows a trial from charge to verdict with every beat present and no slash menu in any frame. Check: frame sheet review.
+- **REL-007** Commits are small and logical, with no AI attribution; tag `trial-run--v0.1.0` via `claude plugin tag`, on which the release workflow re-runs the gates and publishes the plugin zip, its SHA-256 and the CHANGELOG section. Check: `git log` review, `.github/workflows/release.yml`.
 
 ## Out of scope
 
-Desktop SVG rendering, sounds beyond the existing gavel, a public directory submission (after the owner reviews the release), light themes.
+Desktop SVG rendering, sounds beyond the existing gavel, a public directory submission, light themes.
 
 ## Risks
 
 - Exhibits widen access from none to read-only `git`; a malicious repository cannot inject through argv, but output reaches the model, hence EXHIBIT-004.
-- Contempt changes cost and latency claims in the README and the article; REL-004 and the article sync cover it.
+- Contempt changes cost and latency claims in the README; REL-004 covers it.
 
-## Decisions (owner, resolved)
+## Decisions
 
 1. Exhibits: read-only git access is approved, allowlist only (EXHIBIT-001).
 2. Precedent: removed from 0.1.0; every charged command goes to trial (PRECEDENT-001 to 004).
 3. Contempt: per session (CONTEMPT-005).
-
-## Micro-tasks, in order
-
-1. CONTEMPT-002 normaliser (pure) and tests.
-2. CONTEMPT-001, 003, 005 wiring in `tool.check`, reason text.
-3. CONTEMPT-004 stamp, docket verdict, art tests.
-4. SENTENCE-001, 004 table (pure).
-5. SENTENCE-002, 003 reason and pane.
-6. EXHIBIT-001, 002, 004 gatherer (pure argv plan plus a runner over `$.process.run`).
-7. EXHIBIT-003 evidence in prompts and pane; EXHIBIT-005 README.
-8. PRECEDENT-001 to 004: removed from this release.
-9. APPEAL-001, 002, with CONTEMPT-005, SESSION-001 and STORE-001 before the features that depend on them.
-10. SHOW-003, SHOW-002, SHOW-001, SHOW-004, SHOW-005, then SHOW-006 last so it describes the finished code.
-11. REL-001 to 004, then live playground verification of every feature, then REL-006 recording after the usage banner clears, then REL-005 and REL-007 on the owner's go-ahead.
