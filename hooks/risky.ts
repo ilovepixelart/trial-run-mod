@@ -324,14 +324,35 @@ const doubleQuotedOf = (body: string, scripts: string[]): Word => {
 }
 
 /**
- * Whether an unquoted `*`, `?`, `[...]` or `{a,b}` at `at` is a pattern the
- * shell expands.
+ * The index of the first character in `stops` (a regex class) after `at`,
+ * or the end of the line.
  */
-const isPatternAt = (line: string, at: number) =>
-  line[at] === '*' ||
-  line[at] === '?' ||
-  (line[at] === '[' && /^\[[^\s\]]+\]/.test(line.slice(at))) ||
-  (line[at] === '{' && /^\{[^\s{}]*(,|\.\.)[^\s{}]*\}/.test(line.slice(at)))
+const stopAfter = (line: string, at: number, stops: RegExp): number => {
+  stops.lastIndex = at + 1
+  return stops.exec(line)?.index ?? line.length
+}
+
+/**
+ * Whether an unquoted `*`, `?`, `[...]` or `{a,b}` at an index of `line` is
+ * a pattern the shell expands, asked in increasing order of index. The end
+ * of the last `[` looked ahead from is kept: every `[` before it ends there
+ * too, so a run of them is read once, not once each.
+ */
+const patternReaderOf = (line: string) => {
+  let bracketEnd = -1
+  return (at: number): boolean => {
+    if (line[at] === '[') {
+      bracketEnd = at < bracketEnd ? bracketEnd : stopAfter(line, at, /[\s\]]/g)
+      return line[bracketEnd] === ']' && bracketEnd > at + 1
+    }
+    if (line[at] === '{') {
+      const end = stopAfter(line, at, /[\s{}]/g)
+      const body = line.slice(at + 1, end)
+      return line[end] === '}' && (body.includes(',') || body.includes('..'))
+    }
+    return line[at] === '*' || line[at] === '?'
+  }
+}
 
 /**
  * A redirection operator at `at` (`>`, `2>`, `&>`, `>>`, `<<<`, `>&2`, ...):
@@ -394,6 +415,7 @@ const lexOf = (line: string): { words: Word[]; scripts: string[]; breaks: number
   let word: Word | undefined
   let target = false
   let input: Input | undefined
+  const isPatternAt = patternReaderOf(line)
   const end = () => {
     if (word !== undefined && !target) words.push(word)
     if (word !== undefined && target && input?.kind === 'string' && input.word.text === '') input = { kind: 'string', word }
@@ -424,7 +446,7 @@ const lexOf = (line: string): { words: Word[]; scripts: string[]; breaks: number
       add(line[at + 1] ?? '', true)
       at += 2
     } else {
-      add(char, !isPatternAt(line, at))
+      add(char, !isPatternAt(at))
       at += 1
     }
   }
@@ -479,10 +501,18 @@ const documentAt = (line: string, at: number): { newline: number; end: number; d
     return undefined
   }
   const delimiter = match[2] ?? match[3] ?? (match[4] ?? '').replace(/^\\/, '')
-  const lines = line.slice(newline + 1).split('\n')
-  const close = lines.findIndex(body => (match[1] === '-' ? body.replace(/^\t+/, '') : body) === delimiter)
-  const body = (close === -1 ? lines : lines.slice(0, close)).join('\n')
-  const end = close === -1 ? line.length : newline + 1 + lines.slice(0, close + 1).join('\n').length
+  // the lines after it are read up to its delimiter only, so each
+  // here-document of a line is read once
+  let start = newline + 1
+  let stop = line.indexOf('\n', start)
+  const isClose = (text: string) => (match[1] === '-' ? text.replace(/^\t+/, '') : text) === delimiter
+  while (stop !== -1 && !isClose(line.slice(start, stop))) {
+    start = stop + 1
+    stop = line.indexOf('\n', start)
+  }
+  const isClosed = stop !== -1 || isClose(line.slice(start))
+  const body = isClosed ? line.slice(newline + 1, Math.max(newline + 1, start - 1)) : line.slice(newline + 1)
+  const end = isClosed && stop !== -1 ? stop : line.length
   const isQuoted = match[2] !== undefined || match[3] !== undefined || (match[4] ?? '').startsWith('\\')
   return { newline, end, document: { body, exact: isQuoted || !/[$`\\]/.test(body), spelling: line.slice(newline, end) } }
 }
@@ -590,8 +620,7 @@ const splitStringOf = (words: readonly Word[], at: number): string | undefined =
  * the value of `flock -c`, or every word left for `watch` and `parallel`
  * (its `:::` arguments included: each is added to the command).
  */
-const wrapperScriptOf = (wrapper: string, words: readonly Word[], at: number): string | undefined => {
-  const texts = words.map(word => word.text)
+const wrapperScriptOf = (wrapper: string, words: readonly Word[], texts: readonly string[], at: number): string | undefined => {
   if (wrapper === 'env') {
     return splitStringOf(words, at)
   }
@@ -611,10 +640,11 @@ const commandStartOf = (words: readonly Word[]): { at: number; script?: string }
   let at = 0
   let wrapper: string | undefined
   let operands = 0
+  const texts = words.map(word => word.text)
   while (at < words.length) {
     const word = words[at] ?? { text: '', exact: true }
     const program = programOf(word)
-    const script = wrapper === undefined ? undefined : wrapperScriptOf(wrapper, words, at)
+    const script = wrapper === undefined ? undefined : wrapperScriptOf(wrapper, words, texts, at)
     if (script !== undefined) {
       return { at, script }
     }
@@ -651,14 +681,32 @@ const commandsOf = (part: Part, depth = 0): Simple[] => {
   const { words, scripts, breaks, input } = lexOf(part.text.trim())
   const ends = [...breaks, words.length]
   const groups = [0, ...breaks].map((from, index) => words.slice(from, ends[index]))
-  return [...groups.flatMap(group => simpleOf(group, { part, input, nested })), ...scripts.flatMap(nested)]
+  const context: Context = { part, input, nested, spelling: spellingOf(part.text), read: once(() => inputOf(part, input)), unread: once(() => unreadOf(part, input)) }
+  return [...groups.flatMap(group => simpleOf(group, context)), ...scripts.flatMap(nested)]
 }
 
 /**
- * Where a group of words stands: its segment, what its input is
- * redirected from, and how to read a script it runs.
+ * A value made on first use and kept: a segment can hold as many groups as
+ * it has characters (`((((`), and each would otherwise read it whole again.
  */
-type Context = { part: Part; input: Input | undefined; nested: (script: string) => Simple[] }
+const once = <T>(make: () => T): (() => T) => {
+  let made: { value: T } | undefined
+  return () => (made ??= { value: make() }).value
+}
+
+/**
+ * Where a group of words stands: its segment and its spelling, what its
+ * input is redirected from and the script read there, the segment charged
+ * as an unread script, and how to read a script it runs.
+ */
+type Context = {
+  part: Part
+  input: Input | undefined
+  nested: (script: string) => Simple[]
+  spelling: string
+  read: () => ReturnType<typeof inputOf>
+  unread: () => Simple
+}
 
 /**
  * The simple command of one group of words, or the commands of the script
@@ -671,7 +719,7 @@ const simpleOf = (words: readonly Word[], context: Context): Simple[] => {
   const rest = head === undefined ? [] : [program ?? head.text, ...args.map(word => word.text)]
   const inner = start.script ?? innerScriptOf(rest)
   const open = head !== undefined && program === undefined
-  const own = inner === undefined ? [{ words: rest, open, text: spellingOf(context.part.text) }] : context.nested(inner)
+  const own = inner === undefined ? [{ words: rest, open, text: context.spelling }] : context.nested(inner)
   const fed = inner === undefined ? fedOf(rest, context) : []
   const perFile = program === 'find' ? execsOf(args) : []
   return [...own, ...fed, ...perFile.flatMap(command => simpleOf(command, context).map(simple => ({ ...simple, whole: rest })))]
@@ -706,7 +754,8 @@ const outputOf = (part: Part): ReturnType<typeof inputOf> => {
   const [head, ...args] = words.slice(commandStartOf(words).at)
   const program = head === undefined ? undefined : programOf(head)
   if (program === 'echo' || program === 'printf') {
-    const shown = program === 'echo' ? args.filter((word, at) => !args.slice(0, at + 1).every(one => /^-[neE]+$/.test(one.text))) : args
+    const options = args.findIndex(word => !/^-[neE]+$/.test(word.text))
+    const shown = program === 'echo' ? args.slice(options === -1 ? args.length : options) : args
     const script = shown.map(word => word.text).join(program === 'echo' ? ' ' : '\n').replaceAll('\\n', '\n')
     return { script, exact: shown.every(word => word.exact) }
   }
@@ -718,23 +767,30 @@ const outputOf = (part: Part): ReturnType<typeof inputOf> => {
  * from a file it names, and the script charged as unread when the line
  * does not spell all of it. Read out with what feeds it.
  */
-const fedOf = (rest: readonly string[], { part, input, nested }: Context): Simple[] => {
+const fedOf = (rest: readonly string[], { nested, read: readOf, unread: unreadOf }: Context): Simple[] => {
   const program = rest[0] ?? ''
   const isSql = SQL_CLIENTS.has(program)
   const isShell = SHELLS.has(program) && shellReadingOf(rest) === 'input'
-  const read = isSql || isShell ? inputOf(part, input) : undefined
-  const fromText = input === undefined && part.from !== undefined ? `${spellingOf(part.from.text)} | ` : ''
-  const text = `${fromText}${spellingOf(part.text)}${input?.kind === 'document' ? (part.document?.spelling ?? '') : ''}`
-  const unread: Simple = { words: text.split(/\s+/), open: false, text, unread: true }
+  const read = isSql || isShell ? readOf() : undefined
   const options = SQL_FILE_OPTIONS.get(program) ?? []
   if (rest.slice(1).some(word => options.some(option => word === option || word.startsWith(option.startsWith('--') ? `${option}=` : option)))) {
-    return [unread]
+    return [unreadOf()]
   }
   if (read === undefined || read === 'unread') {
-    return read === undefined ? [] : [unread]
+    return read === undefined ? [] : [unreadOf()]
   }
-  const commands = isShell ? nested(read.script) : [{ words: [...rest, ...read.script.split(/\s+/)], open: false, text }]
-  return read.exact ? commands : [...commands, unread]
+  const commands = isShell ? nested(read.script) : [{ words: [...rest, ...read.script.split(/\s+/)], open: false, text: unreadOf().text }]
+  return read.exact ? commands : [...commands, unreadOf()]
+}
+
+/**
+ * A segment charged as a script the court cannot read, read out with what
+ * feeds it.
+ */
+const unreadOf = (part: Part, input: Input | undefined): Simple => {
+  const fromText = input === undefined && part.from !== undefined ? `${spellingOf(part.from.text)} | ` : ''
+  const text = `${fromText}${spellingOf(part.text)}${input?.kind === 'document' ? (part.document?.spelling ?? '') : ''}`
+  return { words: text.split(/\s+/), open: false, text, unread: true }
 }
 
 const EXEC_ACTIONS = new Set(['-exec', '-execdir', '-ok', '-okdir'])

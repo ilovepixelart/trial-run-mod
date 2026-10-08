@@ -4,6 +4,22 @@ import { chargeOf, chargedOf, isSimpleCommand } from '../hooks/risky'
 
 tier('user')
 
+const run = (unit: string, length: number) => unit.repeat(Math.ceil(length / unit.length)).slice(0, length)
+
+/**
+ * The fewest milliseconds of two readings of a command line, charge and
+ * simple check together.
+ */
+const elapsedOf = (command: string) =>
+  Math.min(
+    ...[0, 1].map(() => {
+      const started = Date.now()
+      chargeOf(command)
+      isSimpleCommand(command)
+      return Date.now() - started
+    }),
+  )
+
 describe('risky', () => {
   test('recursive deletes are charged', () => {
     for (const command of [
@@ -68,6 +84,35 @@ describe('risky', () => {
     const started = Date.now()
     expect(chargeOf(command)).toBeUndefined()
     expect(Date.now() - started).toBeLessThan(100)
+  })
+
+  // each was quadratic or worse in its length; sized so the old code took
+  // seconds and the linear one takes milliseconds
+  const runs: readonly (readonly [string, string])[] = [
+    ['[', run('[', 32_000)],
+    ['{,', `{${run(',', 16_000)}`],
+    ['{..', `{${run('.', 16_000)}`],
+    ['(', run('(', 4_000)],
+    [')', run(')', 4_000)],
+    ['((', run('((', 4_000)],
+    ['echo -n', `echo ${run('-n ', 16_000)}| sh`],
+    ['echo words', `echo ${run('a ', 16_000)}| sh`],
+    ['sudo', `${run('sudo ', 32_000)}rm -rf x`],
+    ['xargs -I', `${run('xargs -I ', 32_000)}rm -rf x`],
+    ['shells reading a pipe', `cat x | ${run('(sh ', 8_000)}`],
+  ]
+  for (const [name, command] of runs) {
+    test(`a long run of ${name} is read in time linear in its length`, () => {
+      expect(elapsedOf(command)).toBeLessThan(100)
+    })
+  }
+
+  test('a line of many here-documents is read in time linear in its length', () => {
+    // each here-document once read the rest of the line: four times the
+    // here-documents took sixteen times as long
+    const short = run('cat <<a\na\n', 16_000)
+    const long = run('cat <<a\na\n', 64_000)
+    expect(elapsedOf(long)).toBeLessThan(8 * elapsedOf(short) + 50)
   })
 
   test('global flags before the subcommand do not hide a teardown', () => {
