@@ -453,6 +453,9 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     convicted.clear()
     memory.appealable = undefined
+    if (settings.warning !== undefined) {
+      $.ui.log(settings.warning)
+    }
     await $.command.register({
       name: 'court',
       description:

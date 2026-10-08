@@ -135,6 +135,11 @@ export const RULES: readonly Rule[] = [
 const UNREAD: Omit<Charge, 'command'> = { id: 'unread-script', label: 'unread script' }
 
 /**
+ * The id of every charge the court knows, as the `charges` setting names them.
+ */
+export const CHARGE_IDS: readonly string[] = [...RULES.map(rule => rule.id), UNREAD.id]
+
+/**
  * The options that name a file of SQL for a client to run.
  */
 const SQL_FILE_OPTIONS = new Map<string, readonly string[]>([

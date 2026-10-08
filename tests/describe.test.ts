@@ -54,6 +54,12 @@ describe('describe', () => {
     }
   })
 
+  test('with no known charge on, the court stays on and Bash gains the notice', { options: { charges: ['Force-Push'] } }, async ($, on) => {
+    on('tool.describe', ($, e) => ({ description: e.description }))
+
+    expect((await $.tool.describe({ tool: 'Bash', description: BASH, provider: ENGINE })).description.slice(BASH.length)).toMatch(RISKY)
+  })
+
   test('with every charge switched off, Bash is untouched too', { options: { charges: [] } }, async ($, on) => {
     on('tool.describe', ($, e) => ({ description: e.description }))
 

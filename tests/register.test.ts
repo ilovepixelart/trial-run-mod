@@ -177,6 +177,59 @@ describe('settings', () => {
     expect(seen.calls).toEqual([])
   })
 
+  test('a charges list naming no charge the court knows tries every charge', { options: { charges: ['Force-Push', ''] } }, async ($, on) => {
+    const seen = seatCourt(on, verdictBench(GUILTY, UNTOUCHED))
+
+    for (const [id, command] of EVERY_CHARGE) {
+      const before = seen.calls.length
+      expect((await $.tool.check(check(command))).decision, id).toBe('deny')
+      expect(seen.calls.length - before, id).toBe(3)
+    }
+  })
+
+  test('a charge id the court does not know beside a known one is left out', { options: { charges: ['force-push', 'Hard-Reset'] } }, async ($, on) => {
+    const seen = seatCourt(on, verdictBench(GUILTY, UNTOUCHED))
+
+    expect(await $.tool.check(check('git reset --hard'))).toEqual(UNTOUCHED)
+    expect(seen.calls).toEqual([])
+    expect((await $.tool.check(check('git push --force origin main'))).decision).toBe('deny')
+  })
+
+  for (const [charges, warning] of [
+    [['Force-Push'], 'trial-run: the charges setting names no charge the court knows ("Force-Push"), so every charge goes to trial.'],
+    [['force-push', 'Hard-Reset'], 'trial-run: the charges setting names a charge the court does not know ("Hard-Reset"); it is left out.'],
+  ] as const) {
+    test(`a charges list of ${charges.join(', ')} is warned about once, when the session starts`, { options: { charges } }, async ($, on) => {
+      const logged: string[] = []
+      on('ui.log', ($, e) => {
+        logged.push(e.text)
+        return { value: undefined }
+      })
+      on('session.start', ($, e) => ({ cwd: e.cwd }))
+      on('command.register', ($, e) => ({ value: { command: e.name } }))
+      seatCourt(on, verdictBench(GUILTY, UNTOUCHED))
+
+      await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+      await $.tool.check(check('git push --force origin main'))
+
+      expect(logged).toEqual([warning])
+    })
+  }
+
+  test('a charges list of known ids is not warned about', { options: { charges: ['force-push'] } }, async ($, on) => {
+    const logged: string[] = []
+    on('ui.log', ($, e) => {
+      logged.push(e.text)
+      return { value: undefined }
+    })
+    on('session.start', ($, e) => ({ cwd: e.cwd }))
+    on('command.register', ($, e) => ({ value: { command: e.name } }))
+
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+    expect(logged).toEqual([])
+  })
+
   test('the fair court is the default doctrine', async ($, on) => {
     const seen = seatCourt(on, verdictBench(GUILTY))
 

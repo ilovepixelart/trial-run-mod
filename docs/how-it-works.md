@@ -45,7 +45,7 @@ The exhibits are the only process the court runs: read-only git, by argv array, 
 
 ## userConfig: the settings
 
-`strictness`, `sounds` and `charges` are declared as `userConfig` in [`.claude-plugin/plugin.json`](../.claude-plugin/plugin.json) and reach the module as the `options` of `register`, read by `settingsOf` in [`hooks/settings.ts`](../hooks/settings.ts), where a missing or mistyped value is the manifest's default. A change reloads the module, so settings are read once per load, never per call. Strictness picks the judge's doctrine sentence only: the decision a ruling maps to is fixed, so no setting can make an acquittal allow.
+`strictness`, `sounds` and `charges` are declared as `userConfig` in [`.claude-plugin/plugin.json`](../.claude-plugin/plugin.json) and reach the module as the `options` of `register`, read by `settingsOf` in [`hooks/settings.ts`](../hooks/settings.ts), where a missing or mistyped value is the manifest's default. A `charges` list keeps only the ids `CHARGE_IDS` in `hooks/risky.ts` names; one that names none of them tries every charge, so a typo never switches the court off, and `register` logs the ids it left out with `$.ui.log` on `session.start`. A change reloads the module, so settings are read once per load, never per call. Strictness picks the judge's doctrine sentence only: the decision a ruling maps to is fixed, so no setting can make an acquittal allow.
 
 ## tool.describe: telling Claude the court sits
 
