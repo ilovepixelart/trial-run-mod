@@ -28,13 +28,27 @@ The court is strict but not unreasonable: `rm -rf node_modules` for a clean rein
 
 Requires Claude Code 2.1.287 or later (mods). Developed and tested on 2.1.292. The court is designed for a dark Claude Code theme; on a light theme some text in the pane is hard to read.
 
+From the ilovepixelart marketplace, which pins each mod to its latest release:
+
 ```
-/plugin marketplace add ilovepixelart/trial-run-mod
-/plugin install trial-run@trial-run-mod
-/reload-plugins
+/plugin marketplace add ilovepixelart/claude-code-mods
+/plugin install trial-run@ilovepixelart
 ```
 
-To stay on one release, add the marketplace at its tag instead: `/plugin marketplace add ilovepixelart/trial-run-mod#trial-run--v<version>` (release tags are listed on the repository's Releases page). To take a newer release later, run `claude plugin update trial-run@trial-run-mod` in your shell.
+Or in one line, straight from this repository, following `main`:
+
+```
+/plugin install trial-run --marketplace ilovepixelart/trial-run-mod
+```
+
+To stay on one release, add this repository at its tag instead:
+`/plugin marketplace add ilovepixelart/trial-run-mod#trial-run--v0.1.0`.
+
+Run `/reload-plugins` (or start a new session) after installing. To take a new
+release later, run `claude plugin update trial-run@ilovepixelart` in your
+shell. Each [release](https://github.com/ilovepixelart/trial-run-mod/releases)
+also carries a zip of the plugin for `claude --plugin-url`, and
+[CHANGELOG.md](CHANGELOG.md) lists what each one changed.
 
 To try it from a clone without installing: `claude --plugin-dir /path/to/trial-run-mod`.
 

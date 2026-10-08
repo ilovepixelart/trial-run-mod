@@ -25,4 +25,4 @@ Nothing else is written. Sounds (the gavel and the spoken verdict) play locally.
 
 ## How to delete it
 
-The docket is one file: `~/.claude/plugins/store/trial-run_<marketplace>-<hash>.json`, for example `trial-run_trial-run-mod-a11145457a04.json` when installed from this repository's marketplace. Delete that file to erase every case. The next trial starts a new docket at case #0001.
+The docket is one file: `~/.claude/plugins/store/trial-run_<marketplace>-<hash>.json`, `trial-run_ilovepixelart-<hash>.json` when installed from the ilovepixelart marketplace, or `trial-run_trial-run-mod-<hash>.json` when installed from this repository's. Delete that file to erase every case. The next trial starts a new docket at case #0001.
