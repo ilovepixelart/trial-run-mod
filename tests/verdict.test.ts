@@ -49,13 +49,16 @@ describe('verdict', () => {
     const sentence = sentenceOf({ kind: 'guilty', reason: 'it rewrites shared history' }, { decision: 'allow' }, 'force push')
     expect(sentence.reason).toBe(
       'Objection! The court of the trial-run plugin finds this command GUILTY of force push. ' +
-        'The judge: it rewrites shared history. Tell the person the court has ruled.',
+        'The judge: it rewrites shared history. ' +
+        'This exact command stays denied for the rest of the conversation: do not run it again. ' +
+        'Tell the person the court has ruled; only the person can reopen the case, with /court appeal <context>.',
     )
   })
 
   test('a judge reason that ends in a full stop is not doubled', () => {
     const sentence = sentenceOf({ kind: 'guilty', reason: 'It rewrites history.' }, { decision: 'allow' }, 'force push')
-    expect(sentence.reason).toContain('The judge: It rewrites history. Tell the person')
+    expect(sentence.reason).toContain('The judge: It rewrites history. This exact command')
+    expect(sentence.reason).not.toContain('history..')
   })
 
   test('a mistrial reason names the court and hands the case back to the permission prompt', () => {
@@ -77,7 +80,8 @@ describe('verdict', () => {
       'Objection! The court of the trial-run plugin finds this command GUILTY of force push. ' +
         'The judge: it rewrites shared history. ' +
         'The sentence: Use git push --force-with-lease instead: it refuses to overwrite commits you have not fetched. ' +
-        'Tell the person the court has ruled, and offer them the sentence.',
+        'This exact command stays denied for the rest of the conversation, even after the sentence is carried out: do not run it again. ' +
+        'Tell the person the court has ruled and offer them the sentence; only the person can reopen the case, with /court appeal <context>.',
     )
   })
 
@@ -86,7 +90,9 @@ describe('verdict', () => {
     expect(contempt.decision).toBe('deny')
     expect(contempt.reason).toBe(
       'Contempt of court! The court of the trial-run plugin already found this exact command GUILTY of force push ' +
-        'in case #0017, so it is denied without a new trial. Tell the person the court has ruled; do not retry it.',
+        'in case #0017, so it is denied without a new trial. ' +
+        "Do not retry it or work around the court (another spelling, the person's shell, or switching the court off). " +
+        'Tell the person the court has ruled; only the person can reopen the case, with /court appeal <context>.',
     )
   })
 

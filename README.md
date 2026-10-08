@@ -16,7 +16,7 @@ When Claude reaches for `rm -rf`, a force push or a `DROP TABLE`, court is calle
 2. **The prosecution** explains, in two dramatic sentences at most, what the command could destroy, typed out as it is delivered.
 3. **The defense** argues that the agent needs it, citing what you and Claude actually said. It has to argue for its client, however hopeless the case.
 4. **ALL RISE.** The gavel comes down, the judge rules, and the verdict drops onto the pane in very large letters, still wet with ink. The frame turns the verdict's colour, and it is read out loud.
-5. **Claude hears the verdict too.** A guilty command is refused with the judge's reason and a **sentence**: one safer way to do the same job, read out under the ruling. Claude tells you the court has ruled and offers you the sentence.
+5. **Claude hears the verdict too.** A guilty command is refused with the judge's reason and a **sentence**: one safer way to do the same job, read out under the ruling. Claude tells you the court has ruled and offers you the sentence. Carrying out the sentence does not reopen the case: Claude is told the command stays denied for the rest of the conversation, and that only you can reopen it, with [`/court appeal`](#appeal).
 6. **The verdict stays in the transcript.** The denied Bash call carries a stamp under Claude Code's own row, `✕ GUILTY · case #0017`, or `✕ CONTEMPT · case #0018` for a retry: under the folded `Ran 1 shell command` line, and under the call's result in the full transcript (ctrl+o). Every other row, an acquitted or untried command's included, is drawn as Claude Code draws it.
 7. **Court adjourned.** A turn of the main conversation that held at least one trial ends with one line under Claude's answer: `Court adjourned. 1 conviction, 1 acquittal this turn.` (contempt counts as a conviction; mistrials and waivers are named when there were any). Claude Code labels the line with the plugins whose hooks drew it. A turn with no trial, an interrupted turn and a subagent's turn get none; a subagent's trials are counted in the main turn they ran in.
 
@@ -123,7 +123,7 @@ A charge with no entry gets no sentence; the court does not invent one.
 
 ## Contempt of court
 
-Retry a convicted command in the same session and the court does not sit again: the retry is denied at once as `✕ CONTEMPT`, citing the case that convicted it, with no model call. Same means the same simple command once whitespace and the order of short flags are set aside (`rm -rf src` and `rm -fr src` are the same; `rm -rf dist` is not). Contempt is on the docket as a conviction. A new conversation starts with a clean slate: a new session, `/clear`, `/resume` or `/branch`, but not a compaction.
+Retry a convicted command in the same session and the court does not sit again: the retry is denied at once as `✕ CONTEMPT`, citing the case that convicted it, with no model call. Same means the same simple command once whitespace and the order of short flags are set aside (`rm -rf src` and `rm -fr src` are the same; `rm -rf dist` is not). Contempt is on the docket as a conviction. Claude is told not to retry it or work around the court (another spelling, your shell, or switching the court off), and that only you can reopen the case, with [`/court appeal`](#appeal). A new conversation starts with a clean slate: a new session, `/clear`, `/resume` or `/branch`, but not a compaction.
 
 ## Appeal
 

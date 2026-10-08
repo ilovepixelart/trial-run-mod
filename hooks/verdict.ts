@@ -49,6 +49,12 @@ const stricter = (a: Decision, b: Decision): Decision =>
  * @param charge what the command was tried for, as the court reads it out
  * @param penalty the court's sentence for a conviction: a safer way to do it
  */
+/**
+ * The one way past a conviction, told to the agent with every denial: a
+ * retry is contempt, so complying with a sentence does not reopen the case.
+ */
+const REOPEN = 'only the person can reopen the case, with /court appeal <context>.'
+
 export const sentenceOf = (ruling: Ruling, beneath: CheckResult, charge: string, penalty?: string): CheckResult => {
   switch (ruling.kind) {
     case 'guilty':
@@ -58,8 +64,10 @@ export const sentenceOf = (ruling: Ruling, beneath: CheckResult, charge: string,
           `Objection! The court of the trial-run plugin finds this command GUILTY of ${charge}. ` +
           `The judge: ${ruling.reason.replace(/[.!\s]+$/, '')}. ` +
           (penalty === undefined
-            ? 'Tell the person the court has ruled.'
-            : `The sentence: ${penalty} Tell the person the court has ruled, and offer them the sentence.`),
+            ? `This exact command stays denied for the rest of the conversation: do not run it again. Tell the person the court has ruled; ${REOPEN}`
+            : `The sentence: ${penalty} ` +
+              'This exact command stays denied for the rest of the conversation, even after the sentence is carried out: do not run it again. ' +
+              `Tell the person the court has ruled and offer them the sentence; ${REOPEN}`),
       }
     case 'acquitted':
     case 'waived':
@@ -90,5 +98,6 @@ export const contemptOf = (caseNumber: number, charge: string): CheckResult => (
   reason:
     `Contempt of court! The court of the trial-run plugin already found this exact command GUILTY of ${charge} ` +
     `in case ${caseNumberOf(caseNumber)}, so it is denied without a new trial. ` +
-    'Tell the person the court has ruled; do not retry it.',
+    "Do not retry it or work around the court (another spelling, the person's shell, or switching the court off). " +
+    `Tell the person the court has ruled; ${REOPEN}`,
 })

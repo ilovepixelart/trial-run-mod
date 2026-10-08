@@ -2,6 +2,12 @@
 
 All notable changes to trial-run. Versions follow [Semantic Versioning](https://semver.org): while the version is 0.y.z, anything may change between releases. The public surface is the `/court` commands, the charges, the verdict-to-decision mapping and the saved docket layout.
 
+## [Unreleased]
+
+### Changed
+
+- What Claude is told on a conviction and on contempt: the command stays denied for the rest of the conversation, even after the sentence is carried out, and only the person can reopen the case, with `/court appeal <context>`. A contempt denial also tells Claude not to work around the court (another spelling, the person's shell, or switching the court off). In 0.2.0 a sentence such as "take a backup first" read as a way to retry: Claude took the backup, retried, was denied for contempt, then suggested running the command from the person's shell or disabling the court.
+
 ## [0.2.0] - 2026-10-08
 
 ### Changed
