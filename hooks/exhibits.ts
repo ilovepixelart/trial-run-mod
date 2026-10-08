@@ -90,13 +90,6 @@ export type Facts = {
  */
 export type IndexEntry = { path: string; size: number; mtimeMs: number }
 
-/**
- * The facts precedent compares: where git ran (repository, directory,
- * branch), whether the upstream branch moved, and whether each target is
- * still tracked.
- */
-export type MaterialFacts = Pick<Facts, 'top' | 'prefix' | 'branch' | 'behind' | 'tracked' | 'untracked' | 'ignoredIn' | 'modifiedIn'>
-
 const MAX_TARGETS = 3
 
 /**
@@ -567,76 +560,3 @@ export const exhibitLinesOf = (facts: Facts): string[] => {
   }
   return said.map((line, at) => `Exhibit ${String.fromCharCode(65 + at)}: ${line}`)
 }
-
-/**
- * The facts precedent compares, only when every one the plan asks for was
- * read in a repository: undefined when any is unknown (no git, not a
- * repository, a timeout, unreadable output) or the charge has none (all but
- * `rm` with paths), so a failed exhibit can never stand in for a known one.
- *
- * @param plan the commands, as `planOf` gave them
- * @param facts what they returned, as `factsOf` read it
- */
-export const materialOf = (plan: readonly ExhibitQuery[], facts: Facts): MaterialFacts | undefined => {
-  // the upstream count is the tracking ref as of the last fetch, not the
-  // remote a push reaches, so it never vouches for a repeat: a force push
-  // sets no precedent and every one goes to trial
-  const asked = plan.filter(one => one.kind === 'tracked')
-  const isRead = (one: ExhibitQuery) => one.target !== undefined && Object.hasOwn(facts.tracked ?? {}, one.target) && facts.tracked?.[one.target] !== undefined
-  const isPlaced = facts.top !== undefined && facts.prefix !== undefined && facts.branch !== undefined
-  return asked.length > 0 && facts.isRepo === true && isPlaced && asked.every(isRead) && isEveryTargetClean(facts)
-    ? materialFactsOf(facts)
-    : undefined
-}
-
-/**
- * The facts precedent compares.
- */
-export const materialFactsOf = (facts: Facts): MaterialFacts => ({
-  ...(facts.untracked === undefined ? {} : { untracked: facts.untracked }),
-  ...(facts.ignoredIn === undefined ? {} : { ignoredIn: facts.ignoredIn }),
-  ...(facts.modifiedIn === undefined ? {} : { modifiedIn: facts.modifiedIn }),
-  ...(facts.top === undefined ? {} : { top: facts.top }),
-  ...(facts.prefix === undefined ? {} : { prefix: facts.prefix }),
-  ...(facts.branch === undefined ? {} : { branch: facts.branch }),
-  ...(facts.behind === undefined ? {} : { behind: facts.behind }),
-  ...(facts.tracked === undefined ? {} : { tracked: facts.tracked }),
-})
-
-const trackedOf = (facts: MaterialFacts) =>
-  JSON.stringify(Object.entries(facts.tracked ?? {}).toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
-
-const isKnown = (facts: MaterialFacts) => facts.behind !== undefined || Object.keys(facts.tracked ?? {}).length > 0
-
-/**
- * Whether every delete target was read clean: no untracked, ignored or
- * changed file under it, each count known. A target with any of them holds
- * work a delete loses that its tracked state does not show.
- */
-const isEveryTargetClean = (facts: MaterialFacts) =>
-  Object.keys(facts.tracked ?? {}).every(
-    target => facts.untracked?.[target] === 0 && facts.ignoredIn?.[target] === 0 && facts.modifiedIn?.[target] === 0,
-  )
-
-const isPlacedNow = (facts: MaterialFacts) =>
-  facts.top !== undefined && facts.prefix !== undefined && facts.branch !== undefined
-
-/**
- * Whether the facts that matter are the same then and now: where git ran
- * was read now and is the same, a fact about the target was read
- * (unknown never equals unknown), no upstream commits this branch lacks in
- * either, and every target tracked or not as before. `now` comes from
- * `materialOf`, so it holds every fact its charge asks for; equality
- * makes `then` hold the same.
- */
-export const isSameMaterial = (then: MaterialFacts, now: MaterialFacts): boolean =>
-  isPlacedNow(now) &&
-  isKnown(now) &&
-  isEveryTargetClean(then) &&
-  isEveryTargetClean(now) &&
-  then.top === now.top &&
-  then.prefix === now.prefix &&
-  then.branch === now.branch &&
-  then.behind === now.behind &&
-  (now.behind === undefined || now.behind === 0) &&
-  trackedOf(then) === trackedOf(now)

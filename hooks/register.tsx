@@ -3,14 +3,14 @@ import type { EngineInterface, Register, ResultOf } from 'claude-code'
 
 import type { CourtRole, CourtTrial, CourtVerdict } from '../types'
 import { contemptKeyOf } from './contempt'
-import { DOCKET_LAYOUT, casesOf, docketOf, fileCase, isReadableLayout, nextCaseNumber, precedentOf, priorsOf } from './docket'
-import { GIT_ENV, exhibitLinesOf, factsOf, isLexicalPath, materialOf, namesAlong, planOf, statPathsOf, targetsIn, withModified, withoutTargets } from './exhibits'
+import { DOCKET_LAYOUT, casesOf, docketOf, fileCase, isReadableLayout, nextCaseNumber, priorsOf } from './docket'
+import { GIT_ENV, exhibitLinesOf, factsOf, isLexicalPath, namesAlong, planOf, statPathsOf, targetsIn, withModified, withoutTargets } from './exhibits'
 import type { ExhibitResult, Facts } from './exhibits'
 import type { CaseRecord } from './docket'
 import { gaugeOf } from './gauge'
 import { caseNumberOf, caseRowOf, docketLayoutOf, headerLinesOf, lineOf, rapSheetLayoutOf, wrapOf } from './layout'
 import { DELIBERATION_MS, LANDING_MS, RISE_MS, paceOf } from './pace'
-import { chargeOf, isSimpleCommand } from './risky'
+import { chargeOf } from './risky'
 import { sentenceFor } from './sentence'
 import { GAVEL, SCALES, segmentsOf, stampFor } from './stamp'
 import { speechRequestOf, spokenOf, testimonyOf, tightOf, tryCase } from './trial'
@@ -191,18 +191,6 @@ const factsFrom = async ($: EngineInterface, command: string): Promise<Facts> =>
 }
 
 /**
- * The session's project root, where precedent binds; undefined when the
- * session will not say, and then no precedent is set or followed.
- */
-const rootFrom = async ($: EngineInterface): Promise<string | undefined> => {
-  try {
-    return await $.session.root()
-  } catch {
-    return undefined
-  }
-}
-
-/**
  * How each role is heard: through `$.model.complete`, nothing when the
  * reply is refused or empty.
  */
@@ -256,7 +244,6 @@ const appealWith = async ($: EngineInterface, memory: Memory, context: string): 
     charge: appealed.charge.label,
     verdict: ruling.kind,
     at: Date.now(),
-    root: await rootFrom($),
     appeal: appealed.number,
   })
   const key = contemptKeyOf(appealed.charge.command)
@@ -468,7 +455,7 @@ export const register: Register = on => {
         ),
       )
       quietly($.audio.play({ asset: GAVEL_SOUND }))
-      await fileOnDocket($, { command: charge.command, charge: charge.label, verdict: 'contempt', at: Date.now(), root: await rootFrom($) })
+      await fileOnDocket($, { command: charge.command, charge: charge.label, verdict: 'contempt', at: Date.now() })
       return contemptOf(convictedIn, charge.label)
     }
 
@@ -544,28 +531,13 @@ export const register: Register = on => {
     const timer = new AbortController()
     const never = new Promise<Ruling>(() => undefined)
 
-    // what the docket keeps for precedent, once the exhibits are in
-    let filed: Pick<CaseRecord, 'root' | 'facts' | 'precedent'> = {}
     const exhibitsFrom = async () => {
-      const facts = await factsFrom($, command)
-      const exhibits = exhibitLinesOf(facts)
+      const exhibits = exhibitLinesOf(await factsFrom($, command))
       await update($, trialAtom, trial => (trial?.id === id ? { ...trial, exhibits } : trial))
-      return { exhibits, facts: materialOf(planOf(command), facts) }
+      return exhibits
     }
     const heard = async (): Promise<Ruling> => {
-      const [testimony, { exhibits, facts }, root] = await Promise.all([testimonyFrom($), exhibitsFrom(), rootFrom($)])
-      // only a simple command line sets precedent: a compound line's
-      // acquittal says nothing about its charged part alone, so it keeps
-      // no facts. Every case keeps its root, so a conviction, compound or
-      // with unknown facts, still overturns an earlier acquittal here
-      filed = { root, ...(isSimpleCommand(command) && facts !== undefined ? { facts } : {}) }
-      const bound =
-        root === undefined || facts === undefined ? undefined : precedentOf(history, { command, root, facts })
-      if (bound !== undefined) {
-        // acquitted here before on the same facts: no model call
-        filed = { ...filed, precedent: bound.number }
-        return { kind: 'acquitted', reason: `acquitted by precedent: case ${caseNumberOf(bound.number)} heard this command here on the same facts` }
-      }
+      const [testimony, exhibits] = await Promise.all([testimonyFrom($), exhibitsFrom()])
       return tryCase({ command, charge, ...testimony, exhibits }, speak, onSpeech)
     }
 
@@ -610,7 +582,7 @@ export const register: Register = on => {
         })
       })
     })
-    await fileOnDocket($, { command: charge.command, charge: charge.label, verdict: ruling.kind, at: Date.now(), ...filed })
+    await fileOnDocket($, { command: charge.command, charge: charge.label, verdict: ruling.kind, at: Date.now() })
     quietly($.audio.play({ asset: GAVEL_SOUND }))
     quietly($.audio.speak(SPOKEN[ruling.kind]))
     return sentence

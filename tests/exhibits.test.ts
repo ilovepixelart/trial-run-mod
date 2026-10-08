@@ -1,6 +1,6 @@
 import { describe, expect, test, tier } from 'claude-code/testing'
 
-import { GIT_ENV, GIT_HARDENING, exhibitLinesOf, factsOf, isSameMaterial, materialFactsOf, materialOf, namesAlong, planOf, sanitizedOf, isLexicalPath, statPathsOf, targetsIn, withModified, withoutTargets } from '../hooks/exhibits'
+import { GIT_ENV, GIT_HARDENING, exhibitLinesOf, factsOf, namesAlong, planOf, sanitizedOf, isLexicalPath, statPathsOf, targetsIn, withModified, withoutTargets } from '../hooks/exhibits'
 import type { ExhibitQuery } from '../hooks/exhibits'
 
 tier('user')
@@ -214,55 +214,6 @@ describe('exhibits', () => {
     ])
   })
 
-  test('the facts that matter for precedent: upstream ahead and each target tracked or not', () => {
-    expect(materialFactsOf({ isRepo: true, behind: 0, upstreamAuthors: 4 })).toEqual({ behind: 0 })
-    expect(materialFactsOf({ isRepo: true, tracked: { src: true }, untracked: { src: 3 }, ignoredIn: { src: 0 }, modifiedIn: { src: 1 } })).toEqual({
-      tracked: { src: true }, untracked: { src: 3 }, ignoredIn: { src: 0 }, modifiedIn: { src: 1 },
-    })
-    expect(materialFactsOf({ isRepo: true, tracked: { src: true }, untracked: { src: 1 } })).toEqual({ tracked: { src: true }, untracked: { src: 1 } })
-    expect(materialFactsOf({})).toEqual({})
-  })
-
-  test('material facts exist only when every one the plan asks for was read', () => {
-    const push = planOf('git push --force origin main')
-    const here = { top: '/work/app', prefix: '', branch: 'main' }
-    // a force push never sets precedent, even with every fact read
-    expect(materialOf(push, { isRepo: true, ...here, behind: 0, upstreamAuthors: 1 })).toBeUndefined()
-    expect(materialOf(push, { isRepo: true, behind: 0 })).toBeUndefined()
-    expect(materialOf(push, { isRepo: true, top: '/work/app', prefix: '', behind: 0 })).toBeUndefined()
-    expect(materialOf(push, { isRepo: true, ...here, upstreamAuthors: 1 })).toBeUndefined()
-    expect(materialOf(push, { isRepo: false })).toBeUndefined()
-    expect(materialOf(push, { behind: 0 })).toBeUndefined()
-    const rm = planOf('rm -rf a b')
-    const clean = { untracked: { a: 0, b: 0 }, ignoredIn: { a: 0, b: 0 }, modifiedIn: { a: 0, b: 0 } }
-    expect(materialOf(rm, { isRepo: true, ...here, tracked: { a: false, b: true }, ...clean })).toEqual({ ...here, tracked: { a: false, b: true }, ...clean })
-    expect(materialOf(rm, { isRepo: true, ...here, tracked: { a: false }, ...clean })).toBeUndefined()
-    expect(materialOf(planOf('git clean -fd'), { isRepo: true, untracked: { '.': 0 } })).toBeUndefined()
-    expect(materialOf(planOf('git reset --hard HEAD~1'), { isRepo: true, ahead: 0 })).toBeUndefined()
-    expect(materialOf(planOf('terraform destroy'), {})).toBeUndefined()
-    expect(materialOf(planOf('rm -rf'), { isRepo: true })).toBeUndefined()
-  })
-
-  test('unknown never equals unknown: facts match only when something was known and is the same', () => {
-    expect(isSameMaterial({}, {})).toBe(false)
-    expect(isSameMaterial({ tracked: {} }, { tracked: {} })).toBe(false)
-    // without where git ran, a fact names no place: unknown on both sides never matches
-    expect(isSameMaterial({ behind: 0 }, { behind: 0 })).toBe(false)
-    expect(isSameMaterial({ tracked: { a: false } }, { tracked: { a: false } })).toBe(false)
-    const here = { top: '/work/app', prefix: 'sub/', branch: 'main', tracked: { a: false }, untracked: { a: 0 }, ignoredIn: { a: 0 }, modifiedIn: { a: 0 } }
-    expect(isSameMaterial({ ...here, top: undefined }, { ...here, top: undefined })).toBe(false)
-    expect(isSameMaterial({ ...here, prefix: undefined }, { ...here, prefix: undefined })).toBe(false)
-    expect(isSameMaterial({ ...here, branch: undefined }, { ...here, branch: undefined })).toBe(false)
-    expect(isSameMaterial({ ...here, tracked: undefined }, { ...here, tracked: undefined })).toBe(false)
-    expect(isSameMaterial({ ...here, tracked: undefined, behind: 0 }, { ...here, tracked: undefined, behind: 0 })).toBe(true)
-    expect(isSameMaterial(here, { ...here })).toBe(true)
-    expect(isSameMaterial(here, { ...here, top: '/work/other' })).toBe(false)
-    expect(isSameMaterial(here, { ...here, prefix: '' })).toBe(false)
-    expect(isSameMaterial(here, { ...here, branch: 'dev' })).toBe(false)
-    expect(isSameMaterial({ tracked: { a: false } }, here)).toBe(false)
-    expect(isSameMaterial({}, { tracked: { a: false } })).toBe(false)
-  })
-
   test('a push is read for the branch it names, by name, and only in the one form that names it exactly', () => {
     const argsOf = (command: string) => planOf(command).map(subcommandOf)
     expect(argsOf('git push --force origin main')).toEqual([
@@ -356,8 +307,6 @@ describe('exhibits', () => {
       const facts = factsOf(plan, [ran(0, 'true\n/work/app\n\nmain\n'), ran(0, 'src/a\n'), ran(0, ''), ran(0, ''), ran(0, ''), ran(128), undefined, ran(128), undefined])
       expect(facts, name).toEqual({ isRepo: true, ...here })
       expect(exhibitLinesOf(facts), name).toEqual([])
-      expect(materialOf(plan, facts), name).toBeUndefined()
-      expect(materialOf(plan, { isRepo: true, ...here, tracked: { src: true } }), name).toBeUndefined()
     }
   })
 
@@ -366,9 +315,6 @@ describe('exhibits', () => {
     const facts = factsOf(plan, [ran(0, 'true\n/work/app\n\nmain\n'), ran(1), ran(0, ''), ran(0, ''), ran(0, '')])
     expect(Object.hasOwn(facts.tracked ?? {}, '__proto__')).toBe(true)
     expect(exhibitLinesOf(facts)).toEqual(['Exhibit A: __proto__ is not tracked by git, so history does not keep it.'])
-    // nothing changed under it, as the court's stat of each index entry would find
-    const clean = { ...facts, modifiedIn: Object.fromEntries([['__proto__', 0]]) }
-    expect(materialOf(plan, clean)?.tracked?.['__proto__']).toBe(false)
   })
 
   test('the repository, the directory within it and the branch are read with the first query', () => {
@@ -396,7 +342,6 @@ describe('exhibits', () => {
     const facts = factsOf(plan, [ran(0, 'true\n/work/app\n\nHEAD\n'), ran(1), ran(0, ''), ran(0, '')])
     expect(facts.branch).toBeUndefined()
     expect(facts.top).toBeUndefined()
-    expect(materialOf(plan, facts)).toBeUndefined()
   })
 
   describe('a clean target', () => {
@@ -409,7 +354,6 @@ describe('exhibits', () => {
     // the index file was written after every file under src last changed
     const statted = (facts: ReturnType<typeof read>, stat: typeof same | undefined, indexMs: number | undefined = 200_000) =>
       withModified(facts, new Map(statPathsOf(facts).map(path => [path, stat])), indexMs)
-    const place = { top: '/work/app', prefix: '', branch: 'main' }
 
     test('the index entries under a target are read, and each is compared with the file by size and time', () => {
       expect(statPathsOf(read())).toEqual(['src/a.txt'])
@@ -426,25 +370,6 @@ describe('exhibits', () => {
       const many = Array.from({ length: 201 }, (_, at) => entry(`src/f${at}`, 1)).join('')
       expect(statPathsOf(read('', '', many))).toEqual([])
       expect(statted(read('', '', many), same).modifiedIn).toBeUndefined()
-    })
-
-    test('precedent needs every target clean: no untracked, ignored or changed file under it', () => {
-      expect(materialOf(plan, statted(read(), same))).toEqual({
-        ...place, tracked: { src: true }, untracked: { src: 0 }, ignoredIn: { src: 0 }, modifiedIn: { src: 0 },
-      })
-      expect(materialOf(plan, statted(read('src/precious-new.ts\n'), same))).toBeUndefined()
-      expect(materialOf(plan, statted(read('', 'src/prod.env\n'), same))).toBeUndefined()
-      expect(materialOf(plan, statted(read(), { ...same, size: 17 }))).toBeUndefined()
-      expect(materialOf(plan, read())).toBeUndefined()
-    })
-
-    test('a recorded case that did not record a clean target binds nothing', () => {
-      const now = materialOf(plan, statted(read(), same))!
-      expect(isSameMaterial(now, now)).toBe(true)
-      expect(isSameMaterial({ ...place, tracked: { src: true } }, now)).toBe(false)
-      expect(isSameMaterial({ ...now, untracked: { src: 1 } }, now)).toBe(false)
-      expect(isSameMaterial({ ...now, modifiedIn: { src: 2 } }, now)).toBe(false)
-      expect(isSameMaterial(now, { ...now, ignoredIn: { src: 1 } })).toBe(false)
     })
 
     test('changed files under a target are named as evidence', () => {

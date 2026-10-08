@@ -1,6 +1,6 @@
 import { describe, expect, test, tier } from 'claude-code/testing'
 
-import { DOCKET_LAYOUT, casesOf, docketOf, fileCase, isReadableLayout, precedentOf, priorsOf } from '../hooks/docket'
+import { DOCKET_LAYOUT, casesOf, docketOf, fileCase, isReadableLayout, priorsOf } from '../hooks/docket'
 import type { CaseRecord } from '../hooks/docket'
 
 tier('user')
@@ -133,139 +133,15 @@ describe('docket', () => {
     expect(isReadableLayout(17)).toBe(false)
   })
 
-  describe('precedent', () => {
-    // where git ran: precedent compares it too
-    const PLACE = { top: '/work/app', prefix: '', branch: 'main' }
-    // a delete target read clean: nothing untracked, ignored or changed under it
-    const CLEAN = (target: string) => ({ untracked: { [target]: 0 }, ignoredIn: { [target]: 0 }, modifiedIn: { [target]: 0 } })
-    const heard = (number: number, verdict: CaseRecord['verdict'], over: Partial<CaseRecord> = {}): CaseRecord => ({
-      ...record(number, 'recursive delete', verdict, 'rm -rf dist'),
-      root: '/work/app',
-      facts: { ...PLACE, tracked: { dist: false }, ...CLEAN('dist') },
-      ...over,
-    })
-    const sought = { command: 'rm -rf dist', root: '/work/app', facts: { ...PLACE, tracked: { dist: false }, ...CLEAN('dist') } }
-
-    test('an acquittal in the same project root on the same command line is precedent', () => {
-      expect(precedentOf([heard(1, 'acquitted')], sought)?.number).toBe(1)
-      expect(precedentOf([heard(1, 'acquitted')], { ...sought, command: 'rm  -fr dist' })?.number).toBe(1)
-      expect(precedentOf([heard(1, 'acquitted')], { ...sought, command: 'rm -rf build' })).toBeUndefined()
-    })
-
-    test('only a plainly spelled command name sets or follows precedent', () => {
-      expect(precedentOf([heard(1, 'acquitted')], sought)?.number).toBe(1)
-      for (const command of ['./rm -rf dist', '/bin/rm -rf dist', 'RM -rf dist']) {
-        expect(precedentOf([heard(1, 'acquitted')], { ...sought, command }), command).toBeUndefined()
-        expect(precedentOf([heard(1, 'acquitted', { command })], { ...sought, command }), command).toBeUndefined()
-      }
-      expect(precedentOf([heard(1, 'acquitted', { command: '/bin/rm -rf dist' })], sought)).toBeUndefined()
-    })
-
-    test('a wrapped command line never follows precedent', () => {
-      expect(precedentOf([heard(1, 'acquitted')], sought)?.number).toBe(1)
-      for (const command of ['command /bin/rm -rf dist', 'nice ./rm -rf dist', 'env rm -rf dist', 'time rm -rf dist', 'command rm -rf dist', '/usr/bin/env rm -rf dist']) {
-        expect(precedentOf([heard(1, 'acquitted')], { ...sought, command }), command).toBeUndefined()
-        expect(precedentOf([heard(1, 'acquitted', { command })], { ...sought, command }), command).toBeUndefined()
-      }
-    })
-
-    test('a later conviction under another spelling still overturns an acquittal', () => {
-      expect(precedentOf([heard(1, 'acquitted'), heard(2, 'guilty', { command: '/bin/rm -rf dist' })], sought)).toBeUndefined()
-    })
-
-    test('precedent is per project', () => {
-      expect(precedentOf([heard(1, 'acquitted')], { ...sought, root: '/work/other' })).toBeUndefined()
-      expect(precedentOf([heard(1, 'acquitted', { root: undefined })], sought)).toBeUndefined()
-    })
-
-    test('a case whose facts were not read, or are missing, is never precedent', () => {
-      expect(precedentOf([heard(1, 'acquitted', { facts: undefined })], sought)).toBeUndefined()
-      expect(precedentOf([heard(1, 'acquitted', { facts: {} })], { ...sought, facts: {} })).toBeUndefined()
-      const [nulled] = casesOf([{ ...heard(1, 'acquitted'), facts: null }])
-      expect(precedentOf([nulled!], sought)).toBeUndefined()
-    })
-
-    test('a case filed before layout 2 is never precedent', () => {
-      expect(precedentOf([record(1, 'recursive delete', 'acquitted', 'rm -rf dist')], sought)).toBeUndefined()
-    })
-
-    test('the latest ruling on the command decides: a later conviction or contempt overturns an acquittal', () => {
-      expect(precedentOf([heard(1, 'acquitted'), heard(2, 'guilty')], sought)).toBeUndefined()
-      expect(precedentOf([heard(1, 'acquitted'), heard(2, 'contempt')], sought)).toBeUndefined()
-      expect(precedentOf([heard(1, 'guilty'), heard(2, 'acquitted')], sought)?.number).toBe(2)
-      expect(precedentOf([heard(1, 'acquitted'), heard(2, 'hung'), heard(3, 'waived')], sought)?.number).toBe(1)
-    })
-
-    test('a later conviction filed without a root overturns an acquittal in any root; one in another root does not', () => {
-      expect(precedentOf([heard(1, 'acquitted'), heard(2, 'guilty', { root: undefined })], sought)).toBeUndefined()
-      expect(precedentOf([heard(1, 'acquitted'), heard(2, 'contempt', { root: undefined, facts: undefined })], sought)).toBeUndefined()
-      expect(precedentOf([heard(1, 'guilty', { root: undefined }), heard(2, 'acquitted')], sought)?.number).toBe(2)
-      expect(precedentOf([heard(1, 'acquitted'), heard(2, 'guilty', { root: '/work/other' })], sought)?.number).toBe(1)
-    })
-
-    test('a conviction counts by the key of its charged part, simple line or not; an acquittal needs a whole simple line', () => {
-      expect(precedentOf([heard(1, 'acquitted'), heard(2, 'guilty', { command: 'rm\t-rf dist', facts: undefined })], sought)).toBeUndefined()
-      expect(precedentOf([heard(1, 'guilty', { command: 'rm\t-rf dist' }), heard(2, 'acquitted')], sought)?.number).toBe(2)
-      expect(precedentOf([heard(1, 'acquitted', { command: 'rm\t-rf dist' })], sought)).toBeUndefined()
-    })
-
-    test('changed facts reopen the case: tracked state, or an upstream branch ahead', () => {
-      expect(precedentOf([heard(1, 'acquitted')], { ...sought, facts: { ...PLACE, tracked: { dist: true }, ...CLEAN('dist') } })).toBeUndefined()
-      expect(precedentOf([heard(1, 'acquitted')], { ...sought, facts: {} })).toBeUndefined()
-      const push = { command: 'git push --force origin main', root: '/work/app' }
-      const pushed = (behind: number | undefined) =>
-        heard(1, 'acquitted', { command: push.command, facts: behind === undefined ? PLACE : { ...PLACE, behind } })
-      expect(precedentOf([pushed(0)], { ...push, facts: { ...PLACE, behind: 0 } })?.number).toBe(1)
-      expect(precedentOf([pushed(2)], { ...push, facts: { ...PLACE, behind: 2 } })).toBeUndefined()
-      expect(precedentOf([pushed(0)], { ...push, facts: { ...PLACE, behind: 1 } })).toBeUndefined()
-      expect(precedentOf([pushed(0)], { ...push, facts: PLACE })).toBeUndefined()
-    })
-
-    test('only a simple command line sets or follows precedent', () => {
-      expect(precedentOf([heard(1, 'acquitted')], { ...sought, command: 'rm -rf dist && rm -rf ~' })).toBeUndefined()
-      // the key folds any whitespace, so a newline would otherwise match
-      expect(precedentOf([heard(1, 'acquitted')], { ...sought, command: 'rm -rf\ndist' })).toBeUndefined()
-      expect(precedentOf([heard(1, 'acquitted')], { ...sought, command: 'rm\t-rf dist' })).toBeUndefined()
-      const compound = heard(1, 'acquitted', { command: 'cd app && rm -rf dist' })
-      expect(precedentOf([compound], { ...sought, command: 'cd app && rm -rf dist' })).toBeUndefined()
-    })
-
-    test('a stored record is matched by the command it holds, never by a key it claims', () => {
-      const forged = { ...heard(1, 'acquitted', { command: 'rm -rf build' }), key: '-fr rm dist' } as CaseRecord
-      expect(precedentOf([forged], sought)).toBeUndefined()
-      expect(precedentOf([forged], { ...sought, command: 'rm -rf build' })?.number).toBe(1)
-    })
-
-    test('a command cut to fit the docket is never precedent', () => {
-      const long = `rm -rf ${'x'.repeat(80)}`
-      const [cut] = fileCase([], { command: long, charge: 'c', verdict: 'acquitted', at: 1, root: '/r', facts: {} })
-      expect(cut?.command).toHaveLength(80)
-      expect(precedentOf([cut!], { command: cut!.command, root: '/r', facts: {} })).toBeUndefined()
-      const known = { ...PLACE, tracked: { x: false }, ...CLEAN('x') }
-      const [whole] = fileCase([], { command: 'rm -rf x', charge: 'c', verdict: 'acquitted', at: 1, root: '/r', facts: known })
-      expect(precedentOf([whole!], { command: 'rm -rf x', root: '/r', facts: known })?.number).toBe(1)
-    })
-
-    test('a stored record is read as untrusted: precedent fields of the wrong type are dropped', () => {
-      const [read] = casesOf([
-        { number: 1, command: 'rm -rf dist', charge: 'c', verdict: 'acquitted', at: 1, root: 7, facts: 'x', precedent: 'y' },
-      ])
-      expect(read).toEqual({ number: 1, command: 'rm -rf dist', charge: 'c', verdict: 'acquitted', at: 1 })
-      const [facts] = casesOf([
-        { number: 1, command: 'rm', charge: 'c', verdict: 'acquitted', at: 1, root: '/r', facts: { behind: '0', tracked: { a: 'yes', b: true } } },
-      ])
-      expect(facts?.root).toBe('/r')
-      expect(facts?.facts).toEqual({ tracked: { b: true } })
-      // the counts that keep a target clean are read back, whole counts only
-      const [counted] = casesOf([
-        {
-          number: 2, command: 'rm', charge: 'c', verdict: 'acquitted', at: 1,
-          facts: { tracked: { a: true }, untracked: { a: 0, b: -1 }, ignoredIn: { a: 0, b: '0' }, modifiedIn: { a: 0, b: 1.5 } },
-        },
-      ])
-      expect(counted?.facts).toEqual({ tracked: { a: true }, untracked: { a: 0 }, ignoredIn: { a: 0 }, modifiedIn: { a: 0 } })
-      const [cited] = casesOf([{ number: 3, command: 'rm', charge: 'c', verdict: 'acquitted', at: 1, precedent: 1, appeal: 2 }])
-      expect(cited).toEqual({ number: 3, command: 'rm', charge: 'c', verdict: 'acquitted', at: 1, precedent: 1, appeal: 2 })
-    })
+  test('a stored record is read as untrusted: only the fields this version keeps, each of its type', () => {
+    const [old] = casesOf([
+      {
+        number: 3, command: 'rm -rf dist', charge: 'c', verdict: 'acquitted', at: 1, appeal: 2,
+        root: '/work/app', facts: { top: '/work/app', tracked: { dist: false } }, precedent: 1,
+      },
+    ])
+    expect(old).toEqual({ number: 3, command: 'rm -rf dist', charge: 'c', verdict: 'acquitted', at: 1, appeal: 2 })
+    const [typed] = casesOf([{ number: 4, command: 'rm', charge: 'c', verdict: 'guilty', at: 1, appeal: '2' }])
+    expect(typed).toEqual({ number: 4, command: 'rm', charge: 'c', verdict: 'guilty', at: 1 })
   })
 })

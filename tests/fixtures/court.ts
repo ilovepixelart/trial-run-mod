@@ -27,10 +27,6 @@ export type Bench = {
    */
   git?: (argv: readonly string[]) => ProcessRunResult | Promise<ProcessRunResult>
   /**
-   * The session's project root; `/project` when absent.
-   */
-  root?: () => string
-  /**
    * How the file system answers a stat of an absolute path (the engine
    * resolves a relative one against the working directory before any hook
    * sees it); undefined refuses it. Absent, every path is a directory that
@@ -113,7 +109,6 @@ export const seatCourt = (on: On, bench: Bench): Record => {
   })
   on('tool.check', () => bench.beneath ?? { decision: 'allow' })
   on('session.messages', () => ({ value: bench.messages ?? [] }))
-  on('session.root', () => ({ value: bench.root?.() ?? '/project' }))
   on('ui.open', ($, e) => {
     record.opened.push(e.id)
     return {

@@ -1,8 +1,3 @@
-import { contemptKeyOf } from './contempt'
-import { isSameMaterial } from './exhibits'
-import type { MaterialFacts } from './exhibits'
-import { isSimpleCommand, nameOf } from './risky'
-
 /**
  * One case the court has heard, as the docket keeps it.
  */
@@ -15,19 +10,6 @@ export type CaseRecord = {
    * When the court ruled, in milliseconds since the epoch.
    */
   at: number
-  /**
-   * Since layout 2: the project root the case was heard in, when the
-   * session said; and, for a simple command line only, the facts that
-   * matter for precedent. An acquittal without both sets no precedent; a
-   * conviction without a root (filed before every case kept one) counts
-   * in every root.
-   */
-  root?: string
-  facts?: MaterialFacts
-  /**
-   * The case an acquittal by precedent cites.
-   */
-  precedent?: number
   /**
    * The conviction this case heard on appeal.
    */
@@ -62,8 +44,8 @@ export const DOCKET_LAYOUT = 2
 
 /**
  * Whether this version can read a docket saved under a layout: one saved
- * before layouts were recorded, an older layout (layout 1 cases read as
- * they are, without the fields layout 2 added), or this layout. A newer
+ * before layouts were recorded, an older layout, or this layout, each
+ * record read for the fields this version keeps and nothing else. A newer
  * layout is left untouched, never read and never overwritten.
  */
 export const isReadableLayout = (stored: unknown): boolean =>
@@ -102,59 +84,6 @@ export const nextCaseNumber = (history: readonly CaseRecord[]): number => (histo
 const isConviction = (c: CaseRecord) => c.verdict === 'guilty' || c.verdict === 'contempt'
 
 /**
- * Whether a case's command can stand for a whole command line: a simple
- * one, kept whole (shorter than the cut), so its key is read off the
- * command itself and nothing else a stored record claims.
- */
-const isWholeSimple = (command: string) => command.length < COMMAND_CHARS && isSimpleCommand(command)
-
-/**
- * Whether a case is a ruling that bears on precedent in a project root:
- * an acquittal of a whole simple line there, or a conviction there or of
- * unknown root. A conviction counts whatever its line, as contempt does:
- * the docket holds its charged part, matched by key alone.
- */
-const isRulingIn = (c: CaseRecord, root: string) =>
-  c.verdict === 'acquitted'
-    ? c.root === root && isWholeSimple(c.command)
-    : isConviction(c) && (c.root === undefined || c.root === root)
-
-/**
- * Whether a command's name is spelled plainly, as no path, escape or quote:
- * `./rm` may be a script of the same name, so only a plain name acquits.
- */
-const isPlainlyNamed = (command: string) => {
-  const head = command.trim().split(/\s+/)[0] ?? ''
-  return head === nameOf(head)
-}
-
-/**
- * The acquittal that binds a command line as precedent: the latest ruling
- * (guilty, acquitted or contempt) on the same simple command line in the
- * same project root, when it acquitted on the same facts that matter. A
- * conviction filed without a root counts as one in this root. A line that
- * is not one simple command, or names its command other than plainly,
- * never has precedent.
- *
- * @param history the cases so far, oldest first
- * @param sought the whole command line, the project root and the facts now
- */
-export const precedentOf = (
-  history: readonly CaseRecord[],
-  sought: { command: string; root: string; facts: MaterialFacts },
-): CaseRecord | undefined => {
-  if (!isSimpleCommand(sought.command) || !isPlainlyNamed(sought.command)) {
-    return undefined
-  }
-  const key = contemptKeyOf(sought.command)
-  const last = history.findLast(
-    c =>
-      isRulingIn(c, sought.root) && contemptKeyOf(c.command) === key,
-  )
-  return last?.verdict === 'acquitted' && isPlainlyNamed(last.command) && isSameMaterial(last.facts ?? {}, sought.facts) ? last : undefined
-}
-
-/**
  * Prior convictions on one charge.
  */
 export const priorsOf = (history: readonly CaseRecord[], charge: string): number =>
@@ -184,37 +113,6 @@ export const docketOf = (history: readonly CaseRecord[]): Docket => {
   }
 }
 
-const isObject = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value)
-
-/**
- * Stored facts as far as they read as facts: a whole count, and tracked
- * states that are booleans.
- */
-const factsRead = (stored: unknown): MaterialFacts | undefined => {
-  if (!isObject(stored)) {
-    return undefined
-  }
-  const { behind, tracked } = stored
-  const placed = (['top', 'prefix', 'branch'] as const).flatMap(key =>
-    typeof stored[key] === 'string' ? [[key, stored[key]] as const] : [],
-  )
-  const counts = (['untracked', 'ignoredIn', 'modifiedIn'] as const).flatMap(key => {
-    const value = stored[key]
-    return isObject(value)
-      ? [[key, Object.fromEntries(Object.entries(value).filter(([, count]) => Number.isInteger(count) && (count as number) >= 0))] as const]
-      : []
-  })
-  return {
-    ...Object.fromEntries(placed),
-    ...(Object.fromEntries(counts) as Pick<MaterialFacts, 'untracked' | 'ignoredIn' | 'modifiedIn'>),
-    ...(Number.isInteger(behind) && (behind as number) >= 0 ? { behind: behind as number } : {}),
-    ...(isObject(tracked)
-      ? { tracked: Object.fromEntries(Object.entries(tracked).filter(([, value]) => typeof value === 'boolean')) as Record<string, boolean> }
-      : {}),
-  }
-}
-
 /**
  * The cases a stored value holds, or none when it is not a docket. The
  * store is a shared file, so a record is read as untrusted: the fields
@@ -236,18 +134,12 @@ export const casesOf = (stored: unknown): CaseRecord[] =>
               c.verdict === 'waived' ||
               c.verdict === 'contempt'),
         )
-        .map(c => {
-          const facts = factsRead(c.facts)
-          return {
-            number: c.number,
-            command: c.command,
-            charge: c.charge,
-            verdict: c.verdict,
-            at: c.at,
-            ...(typeof c.root === 'string' ? { root: c.root } : {}),
-            ...(facts === undefined ? {} : { facts }),
-            ...(typeof c.precedent === 'number' ? { precedent: c.precedent } : {}),
-            ...(typeof c.appeal === 'number' ? { appeal: c.appeal } : {}),
-          }
-        })
+        .map(c => ({
+          number: c.number,
+          command: c.command,
+          charge: c.charge,
+          verdict: c.verdict,
+          at: c.at,
+          ...(typeof c.appeal === 'number' ? { appeal: c.appeal } : {}),
+        }))
     : []
