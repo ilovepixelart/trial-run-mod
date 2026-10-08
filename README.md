@@ -47,7 +47,7 @@ To stay on one release, add this repository at its tag instead:
 Run `/reload-plugins` (or start a new session) after installing. To take a new
 release later, run `claude plugin update trial-run@ilovepixelart` in your
 shell. Each [release](https://github.com/ilovepixelart/trial-run-mod/releases)
-also carries a zip of the plugin for `claude --plugin-url`, and
+also carries a zip of the plugin for `claude --plugin-url`, with its SHA-256 beside it, and
 [CHANGELOG.md](CHANGELOG.md) lists what each one changed.
 
 To try it from a clone without installing: `claude --plugin-dir /path/to/trial-run-mod`.
