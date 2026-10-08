@@ -320,18 +320,24 @@ const casesFrom = async ($: EngineInterface): Promise<CaseRecord[]> => {
 }
 
 /**
- * Files a ruled case on the docket. The docket is a record, not a
- * condition of the ruling: a store that fails loses the entry, nothing more.
+ * Files a ruled case on the docket and returns the number it was filed
+ * under, which a trial heard at the same time can have moved on from the
+ * number read when the case opened. The docket is a record, not a
+ * condition of the ruling: a store that fails loses the entry, nothing
+ * more, and returns undefined.
  */
-const fileOnDocket = async ($: EngineInterface, filing: Omit<CaseRecord, 'number'>) => {
+const fileOnDocket = async ($: EngineInterface, filing: Omit<CaseRecord, 'number'>): Promise<number | undefined> => {
   try {
     if (!(await isDocketReadable($))) {
-      return
+      return undefined
     }
-    await $.store.set(CASES, fileCase(await casesFrom($), filing))
+    const docket = fileCase(await casesFrom($), filing)
+    await $.store.set(CASES, docket)
     await $.store.set(LAYOUT, DOCKET_LAYOUT)
+    return docket.at(-1)?.number
   } catch {
     // the ruling stands without its docket entry
+    return undefined
   }
 }
 
@@ -534,12 +540,15 @@ export const register: Register = (on, options) => {
       // contempt: on the record, no trial and no model call
       lastId += 1
       const history = await casesFrom($)
+      const number =
+        (await fileOnDocket($, { command: charge.command, charge: charge.label, verdict: 'contempt', at: Date.now() })) ??
+        nextCaseNumber(history)
       const reason = `Already ruled: case ${caseNumberOf(convictedIn)}.`
       await update($, trialAtom, () => ({
         id: lastId,
         command: charge.command,
         charge: charge.label,
-        number: nextCaseNumber(history),
+        number,
         priors: priorsOf(history, charge.label),
         exhibits: [],
         speeches: [{ role: 'judge' as const, text: reason }],
@@ -549,7 +558,7 @@ export const register: Register = (on, options) => {
         isPlaced: true,
       }))
       await update($, bandAtom, () => true)
-      await stampRow($, e.tool_use_id, { kind: 'contempt', number: nextCaseNumber(history) })
+      await stampRow($, e.tool_use_id, { kind: 'contempt', number })
       turnTally.contempt += 1
       const contemptId = lastId
       quietly(
@@ -560,7 +569,6 @@ export const register: Register = (on, options) => {
       if (settings.sounds) {
         quietly($.audio.play({ asset: GAVEL_SOUND }))
       }
-      await fileOnDocket($, { command: charge.command, charge: charge.label, verdict: 'contempt', at: Date.now() })
       return contemptOf(convictedIn, charge.label)
     }
 
@@ -662,17 +670,21 @@ export const register: Register = (on, options) => {
     // the decision exists
     const penalty = ruling.kind === 'guilty' ? sentenceFor(charge.id, charge.command) : undefined
     const sentence = sentenceOf(ruling, await beneath, charge.label, penalty)
+    const number =
+      (await fileOnDocket($, { command: charge.command, charge: charge.label, verdict: ruling.kind, at: Date.now() })) ??
+      opening.number
     turnTally[ruling.kind] += 1
     if (ruling.kind === 'guilty') {
-      convicted.set(contemptKey, opening.number)
-      memory.appealable = { command, charge, key: contemptKey, number: opening.number }
-      await stampRow($, e.tool_use_id, { kind: 'guilty', number: opening.number })
+      convicted.set(contemptKey, number)
+      memory.appealable = { command, charge, key: contemptKey, number }
+      await stampRow($, e.tool_use_id, { kind: 'guilty', number })
     }
     const ruled = tightOf(spokenOf(ruling.reason))
     await update($, trialAtom, trial =>
       trial?.id === id
         ? {
             ...trial,
+            number,
             speeches: [...trial.speeches, { role: 'judge' as const, text: ruled }],
             verdict: { kind: ruling.kind, reason: ruling.reason, decision: sentence.decision, sentence: penalty },
           }
@@ -692,7 +704,6 @@ export const register: Register = (on, options) => {
         })
       })
     })
-    await fileOnDocket($, { command: charge.command, charge: charge.label, verdict: ruling.kind, at: Date.now() })
     if (settings.sounds) {
       quietly($.audio.play({ asset: GAVEL_SOUND }))
       quietly($.audio.speak(SPOKEN[ruling.kind]))

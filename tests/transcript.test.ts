@@ -1,8 +1,8 @@
-import { describe, expect, test, tier } from 'claude-code/testing'
+import { describe, expect, mock, test, tier } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import { isSafeGlyph, layoutWidthOf, textsOf } from './fixtures/art'
-import { seatCourt, verdictBench } from './fixtures/court'
+import { said, seatCourt, verdictBench } from './fixtures/court'
 import { memoryStore } from './fixtures/store'
 
 tier('user')
@@ -147,6 +147,84 @@ describe('transcript', () => {
     expect((await $.tool.check(call('rm -rf ~', 'toolu_failed'))).decision).toBe('ask')
     const row = await $.ui.mount({ ...resultRow('toolu_failed'), surface: 'terminal' })
     expect(await row.drawn()).toEqual(ENGINE_ROW)
+  })
+
+  test('two trials at once are stamped with the numbers they are filed under', async ($, on) => {
+    const saved = memoryStore(on, SIXTEEN)
+    const clock = mock.clock(on)
+    seatCourt(on, {
+      reply: async role => {
+        await clock.sleep(1_000)
+        return said(role === 'judge' ? GUILTY : 'words.')
+      },
+    })
+    drawsEngine(on)
+
+    const first = $.tool.check(call('rm -rf ~', 'toolu_a'))
+    const second = $.tool.check(call('git push --force origin main', 'toolu_b'))
+    await clock.settle()
+    await clock.advance(5_000)
+    expect([(await first).decision, (await second).decision]).toEqual(['deny', 'deny'])
+
+    const docket = (saved.get('cases') as { number: number; command: string }[]).filter(one => one.number > 16)
+    expect(docket.map(one => one.number).sort()).toEqual([17, 18])
+    for (const [id, command] of [['toolu_a', 'rm -rf ~'], ['toolu_b', 'git push --force origin main']] as const) {
+      const row = await $.ui.mount({ ...resultRow(id), surface: 'terminal' })
+      const filed = docket.find(one => one.command === command)?.number
+      expect(textsOf(await row.drawn()).at(-1), id).toBe(`✕ GUILTY · case #00${filed}`)
+      await row.unmount()
+    }
+  })
+
+  test('contempt read while another trial files is stamped with the number it is filed under', async ($, on) => {
+    const clock = mock.clock(on)
+    // a store whose next read of the docket answers what it held when asked,
+    // late enough that a trial heard meanwhile (counsel, then the judge) files first
+    const saved = new Map<string, unknown>(Object.entries(SIXTEEN))
+    let isStaleOnce = false
+    on('store.get', async ($, e) => {
+      const value = saved.get(e.key)
+      if (isStaleOnce && e.key === 'cases') {
+        isStaleOnce = false
+        await clock.sleep(4_000)
+      }
+      return { value }
+    })
+    on('store.set', ($, e) => {
+      saved.set(e.key, e.value)
+      return { value: undefined }
+    })
+    let isJudgeSlow = false
+    seatCourt(on, {
+      reply: async role => {
+        if (isJudgeSlow) {
+          await clock.sleep(1_000)
+        }
+        return said(role === 'judge' ? GUILTY : 'words.')
+      },
+    })
+    drawsEngine(on)
+
+    const convicted = $.tool.check(call('rm -rf ~', 'toolu_17'))
+    await clock.settle()
+    await clock.advance(5_000)
+    expect((await convicted).decision).toBe('deny')
+
+    isJudgeSlow = true
+    const trial = $.tool.check(call('git push --force origin main', 'toolu_trial'))
+    await clock.settle()
+    isStaleOnce = true
+    const retry = $.tool.check(call('rm -rf ~', 'toolu_retry'))
+    await clock.settle()
+    await clock.advance(8_000)
+    expect((await trial).decision).toBe('deny')
+    expect((await retry).reason).toContain('Contempt')
+
+    const docket = saved.get('cases') as { number: number; command: string; verdict: string }[]
+    const filed = docket.find(one => one.verdict === 'contempt')?.number
+    expect(filed).toBe(19)
+    const row = await $.ui.mount({ ...resultRow('toolu_retry'), surface: 'terminal' })
+    expect(textsOf(await row.drawn()).at(-1)).toBe('✕ CONTEMPT · case #0019')
   })
 
   test('another tool sharing a convicted id is untouched', async ($, on) => {

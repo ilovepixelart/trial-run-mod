@@ -33,7 +33,7 @@ The trial in session, whether the band is shown and the stamps of this session's
 
 ## $.store: the docket and its layout
 
-The docket is the only thing kept: the `cases` key of `$.store`, beside a `layout` key holding `DOCKET_LAYOUT`. `isReadableLayout` reads a docket of this layout or an older one and refuses a newer one, which is then never read or overwritten. Every session on the machine shares the store and it has no atomic update, so each filing re-reads `cases` right before it writes ([`hooks/docket.ts`](../hooks/docket.ts)); stored records are read as untrusted and unknown fields are dropped. The docket is a record, not a condition of the ruling: a store that fails loses the entry and the verdict stands.
+The docket is the only thing kept: the `cases` key of `$.store`, beside a `layout` key holding `DOCKET_LAYOUT`. `isReadableLayout` reads a docket of this layout or an older one and refuses a newer one, which is then never read or overwritten. Every session on the machine shares the store and it has no atomic update, so each filing re-reads `cases` right before it writes ([`hooks/docket.ts`](../hooks/docket.ts)), and a trial's stamp, header and contempt citation take the number the case was filed under, so two trials heard at once are numbered as the docket numbers them. Two filings that both read the docket before either writes (from two sessions in the same instant) still file under one number, and the later write drops the earlier case; stored records are read as untrusted and unknown fields are dropped. The docket is a record, not a condition of the ruling: a store that fails loses the entry and the verdict stands.
 
 ## $.model.complete: three calls per trial
 
