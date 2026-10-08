@@ -12,7 +12,7 @@ A Claude Code mod that puts risky shell commands on trial before they run.
 
 When Claude reaches for `rm -rf`, a force push or a `DROP TABLE`, court is called into session in a pane beside the transcript:
 
-1. **The jury deliberates.** A gavel bangs, the scales of justice go up with their pans bobbing, and the case is read into the record with its number and the defendant's prior convictions on the charge. A bar counts down the seconds to the court's deadline. You can **Object** (the command is denied on the spot) or **Skip the trial** (the case is filed as `- WAIVED` and goes to your usual rules): press ctrl+x tab to reach the pane, then `o` or `s`.
+1. **The jury deliberates.** Claude Code's spinner says `Deliberating` until the verdict, then goes back to its own word. A gavel bangs, the scales of justice go up with their pans bobbing, and the case is read into the record with its number and the defendant's prior convictions on the charge. A bar counts down the seconds to the court's deadline. You can **Object** (the command is denied on the spot) or **Skip the trial** (the case is filed as `- WAIVED` and goes to your usual rules): press ctrl+x tab to reach the pane, then `o` or `s`.
 2. **The prosecution** explains, in two dramatic sentences at most, what the command could destroy, typed out as it is delivered.
 3. **The defense** argues that the agent needs it, citing what you and Claude actually said. It has to argue for its client, however hopeless the case.
 4. **ALL RISE.** The gavel comes down, the judge rules, and the verdict drops onto the pane in very large letters, still wet with ink. The frame turns the verdict's colour, and it is read out loud.

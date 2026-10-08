@@ -20,6 +20,7 @@ All notable changes to trial-run. Versions follow [Semantic Versioning](https://
 - Settings (`userConfig`): `strictness` (`lenient`, `fair` or `hanging`, default `fair`) changes the judge's doctrine sentence and never the decision a ruling maps to; `sounds` (default on) silences the gavel and the spoken verdict; `charges` (default every charge) lists the charges that go to trial, and a charge switched off is never tried.
 - The Bash tool's description tells Claude that risky commands stand trial and that stating its intent in the same message helps the defense (`tool.describe`, under 200 characters, Bash only).
 - The verdict in the transcript: a denied call's row carries `✕ GUILTY · case #0017` or `✕ CONTEMPT · case #0018` beneath Claude Code's own drawing of it (the call's `ToolResult`, or the `ToolGroup` it is folded into), which it wraps and never replaces; every other row is untouched.
+- The spinner says `Deliberating` while a trial is in session; only its word changes, and every other time it is Claude Code's own.
 - Requires Claude Code 2.1.287 or later.
 
 ### Known limitations

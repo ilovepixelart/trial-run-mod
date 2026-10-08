@@ -120,6 +120,11 @@ export const COURT_NOTICE =
   ' Risky commands (recursive deletes, force pushes, hard resets and the like) stand trial before they run.' +
   ' State your intent in the same message as the command: the defense quotes it.'
 
+/**
+ * The spinner's word while a trial is in session.
+ */
+const DELIBERATING = 'Deliberating'
+
 const COURT_FAILED: ResultOf['tool.check'] = {
   decision: 'ask',
   reason: 'Mistrial! The court of the trial-run plugin failed, so it goes back to the permission prompt.',
@@ -1041,6 +1046,12 @@ export const register: Register = (on, options) => {
         </Text>
       </Box>
     )
+  })
+
+  // a detail changed, not the drawing: Claude Code animates the word as ever
+  on('ui.render', { component: 'Spinner' }, async ($, e, next) => {
+    const trial = await read($, trialAtom)
+    return trial !== null && trial.verdict === null ? next({ ...e, props: { ...e.props, word: DELIBERATING } }) : next(e)
   })
 
   // the verdict in the transcript, under Claude Code's own drawing of the
