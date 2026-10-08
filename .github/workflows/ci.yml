@@ -27,25 +27,6 @@ jobs:
       - name: Claude Code version
         run: claude --version
 
-      - name: Release check
-        run: node scripts/check-release.mjs
-
-      - name: Validate
-        run: claude plugin validate --strict .
-
-      - name: Test
-        run: claude plugin test .
-
-      - name: Hostile git repositories
-        run: node --test tests/hostile/git.hostile.mjs
-
-      # The engine writes the type declarations into .claude-plugin/types/ when
-      # it loads the plugin, which happens before the login check; with no
-      # credentials the run then exits non-zero by design. The file check is the gate.
-      - name: Write type declarations
-        run: |
-          claude --plugin-dir . -p ping || true
-          test -f .claude-plugin/types/claude-code/index.d.ts
-
-      - name: Typecheck
-        run: npx -y -p typescript tsc -p .
+      # One script holds every gate, so a green local run is the same check.
+      - name: Gates
+        run: node scripts/gates.mjs

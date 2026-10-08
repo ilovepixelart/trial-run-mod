@@ -131,10 +131,8 @@ No network access, no process but those git commands, and of the file system onl
 ## Development
 
 ```sh
-claude plugin validate --strict .
-claude plugin test .
-node --test tests/hostile/git.hostile.mjs
-npx -p typescript tsc -p .
+node scripts/gates.mjs           # every gate CI runs, in its order
+node scripts/gates.mjs --load    # also the tests 8 times at once, as a slower runner would
 ```
 
 The hostile git test runs real git outside the plugin test kit, which runs no processes. `tsc` needs the type declarations Claude Code writes into `.claude-plugin/types/` when it loads the plugin (any `claude --plugin-dir .` run does it). The gavel is synthesized: `python3 scripts/make_gavel.py sounds/gavel.wav` regenerates it. The demo is recorded with [vhs](https://github.com/charmbracelet/vhs) from a scratch repository.

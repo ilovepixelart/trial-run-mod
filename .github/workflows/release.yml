@@ -29,26 +29,9 @@ jobs:
       - name: Claude Code version
         run: claude --version
 
-      - name: Release check
-        run: node scripts/check-release.mjs --tag "$GITHUB_REF_NAME"
-
-      - name: Validate
-        run: claude plugin validate --strict .
-
-      - name: Test
-        run: claude plugin test .
-
-      - name: Hostile git repositories
-        run: node --test tests/hostile/git.hostile.mjs
-
-      # See ci.yml: the plugin load writes the types, then stops at the login check.
-      - name: Write type declarations
-        run: |
-          claude --plugin-dir . -p ping || true
-          test -f .claude-plugin/types/claude-code/index.d.ts
-
-      - name: Typecheck
-        run: npx -y -p typescript tsc -p .
+      # The same gates as ci.yml, with the tag checked against the version.
+      - name: Gates
+        run: node scripts/gates.mjs --tag "$GITHUB_REF_NAME"
 
       - name: Build the plugin zip
         run: |
