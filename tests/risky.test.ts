@@ -13,10 +13,12 @@ const fill = (unit: string, tail: string, length: number) => unit.repeat(Math.fl
 
 /**
  * The median milliseconds of five readings of a command line, charge and
- * simple check together.
+ * simple check together. Another line is read first each time: the last
+ * line read is kept, and a kept one is not read again.
  */
 const elapsedOf = (command: string) => {
   const times = [0, 1, 2, 3, 4].map(() => {
+    chargeOf(':')
     const started = performance.now()
     chargeOf(command)
     isSimpleCommand(command)
@@ -37,6 +39,7 @@ const SLOW_MS = 1_500
  * The steps a reading of a command line took.
  */
 const stepsOf = (command: string) => {
+  chargeOf(':')
   chargeOf(command)
   return readings.steps
 }

@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, ResultOf } from 'claude-code'
 
 import type { CourtRole, CourtTrial, CourtVerdict } from '../types'
-import { contemptKeyOf } from './contempt'
+import { contemptKeyOfLine } from './contempt'
 import { DOCKET_LAYOUT, casesOf, docketOf, fileCase, isReadableLayout, nextCaseNumber, priorsOf } from './docket'
 import { GIT_ENV, exhibitLinesOf, factsOf, isLexicalPath, namesAlong, planOf, statPathsOf, targetsIn, withModified, withoutTargets } from './exhibits'
 import type { ExhibitResult, Facts } from './exhibits'
@@ -209,7 +209,7 @@ const speakerOf =
  */
 type Memory = {
   convicted: Map<string, number>
-  appealable: { command: string; charge: Case['charge']; number: number } | undefined
+  appealable: { command: string; charge: Case['charge']; key: string; number: number } | undefined
 }
 
 /**
@@ -246,7 +246,7 @@ const appealWith = async ($: EngineInterface, memory: Memory, context: string): 
     at: Date.now(),
     appeal: appealed.number,
   })
-  const key = contemptKeyOf(appealed.charge.command)
+  const { key } = appealed
   const said = `${spokenOf(ruling.reason)} Filed as case ${caseNumberOf(number)}.`
   if (ruling.kind === 'acquitted') {
     memory.convicted.delete(key)
@@ -424,10 +424,10 @@ export const register: Register = on => {
   on('tool.check', { tool: 'Bash' }, async ($, e, next) => {
     const command = commandOf(e.input)
     const charge = command === undefined ? undefined : chargeOf(command)
-    if (command === undefined || charge === undefined) {
+    const contemptKey = command === undefined ? undefined : contemptKeyOfLine(command)
+    if (command === undefined || charge === undefined || contemptKey === undefined) {
       return next(e)
     }
-    const contemptKey = contemptKeyOf(charge.command)
     const convictedIn = convicted.get(contemptKey)
     if (convictedIn !== undefined) {
       // contempt: on the record, no trial and no model call
@@ -553,7 +553,7 @@ export const register: Register = on => {
     objections.delete(id)
     if (ruling.kind === 'guilty') {
       convicted.set(contemptKey, opening.number)
-      memory.appealable = { command, charge, number: opening.number }
+      memory.appealable = { command, charge, key: contemptKey, number: opening.number }
     }
 
     const penalty = ruling.kind === 'guilty' ? sentenceFor(charge.id, charge.command) : undefined

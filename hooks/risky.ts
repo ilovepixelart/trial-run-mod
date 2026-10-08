@@ -630,6 +630,12 @@ type Simple = {
    * -exec`), to stand for it in place of `words` once charged.
    */
   whole?: string[]
+  /**
+   * The words a command run per file from a script it names (`find -exec
+   * sh -c '...'`) is known by, as its script reads it: those of a command
+   * it runs per file in turn, or `matched`, the words it is charged on.
+   */
+  known?: string[] | 'matched'
   /** Whether this is a script the court cannot read, charged as such. */
   unread?: boolean
 }
@@ -788,7 +794,12 @@ const simpleOf = (words: readonly Word[], context: Context, finds = 0): Simple[]
   if (perFile.length > 0 && finds >= FIND_DEPTH) {
     return [...own, ...fed, context.unread()]
   }
-  return [...own, ...fed, ...perFile.flatMap(command => simpleOf(command, context, finds + 1).map(simple => ({ ...simple, whole: rest })))]
+  const perFileOf = (simple: Simple): Simple => ({
+    ...simple,
+    whole: rest,
+    ...(simple.text === context.spelling ? {} : { known: simple.known ?? simple.whole ?? 'matched' }),
+  })
+  return [...own, ...fed, ...perFile.flatMap(command => simpleOf(command, context, finds + 1).map(perFileOf))]
 }
 
 /**
@@ -1041,6 +1052,15 @@ export const chargedOf = (command: string): { charge: Charge; words: readonly st
 }
 
 /**
+ * The words a charged command line is known by for contempt: those its
+ * charged command's own spelling reads to, from the reading that charged
+ * it, not a second one; undefined when nothing is charged.
+ *
+ * @param command the Bash tool's `command`, as the model wrote it
+ */
+export const knownWordsOf = (command: string): readonly string[] | undefined => trialOf(command)?.known
+
+/**
  * The longest command line the court reads, in characters; a longer one is
  * charged as unread, not read. Reading is not linear in the length: nested
  * scripts, `find -exec` and pipes read parts of the line again, so the
@@ -1060,28 +1080,48 @@ const MAX_LINE = 64 * 1024
  */
 export const BUDGET = 600_000
 
-type Trial = { charge: Charge; words: readonly string[]; matched: readonly string[] } | undefined
-
-/**
- * The steps the last reading of a command line took: one past `BUDGET` for
- * a reading that ran out, none for a line too long to read.
- */
-export const readings = { steps: 0 }
-
-/**
- * A line charged as unread, not read: too long, or past the budget.
- */
-const unreadLineOf = (command: string): Trial => {
-  const words = command.trim().split(/\s+/)
-  return { charge: { ...UNREAD, command }, words, matched: words }
-}
-
 /**
  * The charge, the words that stand for the charged command, and the words
  * the charge was matched on (those of the command run per file, for a
  * `find -exec`).
  */
 const trialOf = (command: string): Trial => {
+  if (last?.command !== command) {
+    last = { command, trial: readTrialOf(command) }
+    readings.count += 1
+  }
+  return last.trial
+}
+
+/**
+ * A charge with the words that stand for the charged command, the words it
+ * was matched on, and the words it is known by: those its own spelling
+ * reads to (`charge.command`), which make its contempt key.
+ */
+type Trial = { charge: Charge; words: readonly string[]; matched: readonly string[]; known: readonly string[] } | undefined
+
+/**
+ * The last line read and its trial: a check asks for the charge, the
+ * contempt key and the exhibits of one line, and it is read once for all.
+ */
+let last: { command: string; trial: Trial } | undefined
+
+/**
+ * How many command lines have been read since the module loaded, and the
+ * steps the last reading took: one past `BUDGET` for a reading that ran
+ * out, none for a line too long to read.
+ */
+export const readings = { count: 0, steps: 0 }
+
+/**
+ * A line charged as unread, not read: too long, or past the budget.
+ */
+const unreadLineOf = (command: string): Trial => {
+  const words = command.trim().split(/\s+/)
+  return { charge: { ...UNREAD, command }, words, matched: words, known: words }
+}
+
+const readTrialOf = (command: string): Trial => {
   if (command.length > MAX_LINE) {
     readings.steps = 0
     return unreadLineOf(command)
@@ -1098,15 +1138,16 @@ const trialOf = (command: string): Trial => {
   } finally {
     readings.steps = BUDGET - budget.left
   }
-  for (const { words, open, text, whole, unread } of commands) {
+  for (const { words, open, text, whole, known, unread } of commands) {
     if (unread === true) {
-      return { charge: { ...UNREAD, command: text }, words, matched: words }
+      return { charge: { ...UNREAD, command: text }, words, matched: words, known: words }
     }
     const tried = open ? PROGRAMS.map(program => [program, ...words.slice(1)]) : [words]
     for (const one of tried) {
       const rule = RULES.find(candidate => candidate.test(one))
       if (rule) {
-        return { charge: { id: rule.id, label: rule.label, command: text }, words: whole ?? one, matched: one }
+        const own = whole ?? one
+        return { charge: { id: rule.id, label: rule.label, command: text }, words: own, matched: one, known: known === 'matched' ? one : (known ?? own) }
       }
     }
   }

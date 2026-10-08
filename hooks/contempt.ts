@@ -1,4 +1,4 @@
-import { chargedOf } from './risky'
+import { chargedOf, knownWordsOf } from './risky'
 
 /**
  * What makes two commands the same command for contempt: the words in order
@@ -12,8 +12,21 @@ import { chargedOf } from './risky'
  *
  * @param command the charged simple command, as written
  */
-export const contemptKeyOf = (command: string): string => {
-  const words = chargedOf(command)?.words ?? command.trim().split(/\s+/)
+export const contemptKeyOf = (command: string): string => keyOf(chargedOf(command)?.words ?? command.trim().split(/\s+/))
+
+/**
+ * The contempt key of a whole command line's charged command, as
+ * `contemptKeyOf` gives it for that command's spelling, from the one
+ * reading that charged the line; undefined when nothing is charged.
+ *
+ * @param line the Bash tool's `command`, as the model wrote it
+ */
+export const contemptKeyOfLine = (line: string): string | undefined => {
+  const words = knownWordsOf(line)
+  return words === undefined ? undefined : keyOf(words)
+}
+
+const keyOf = (words: readonly string[]): string => {
   const letters = new Set<string>()
   const rest: string[] = []
   for (const word of words) {
