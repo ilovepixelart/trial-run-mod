@@ -2,6 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderInput, ResultOf } from 'claude-code'
 
 import type { CourtRole, CourtStamp, CourtTrial, CourtVerdict } from '../types'
+import { adjournmentOf, emptyTally } from './adjournment'
 import { contemptKeyOfLine } from './contempt'
 import { DOCKET_LAYOUT, casesOf, docketOf, fileCase, isReadableLayout, nextCaseNumber, priorsOf } from './docket'
 import { GIT_ENV, exhibitLinesOf, factsOf, isLexicalPath, namesAlong, planOf, statPathsOf, targetsIn, withModified, withoutTargets } from './exhibits'
@@ -442,6 +443,8 @@ export const register: Register = (on, options) => {
   const objections = new Map<number, (ruling: Ruling) => void>()
   const memory: Memory = { convicted: new Map<string, number>(), appealable: undefined }
   const { convicted } = memory
+  // the cases heard since the main conversation's last turn ended
+  let tally = emptyTally()
 
   const rule = (id: number, ruling: Ruling) => {
     objections.get(id)?.(ruling)
@@ -491,6 +494,23 @@ export const register: Register = (on, options) => {
     return settings.charges?.size === 0 ? described : { ...described, description: `${described.description}${COURT_NOTICE}` }
   })
 
+  // the main conversation's turns only: a subagent's cases are told when the
+  // turn it ran in ends, and an interrupted turn is told nothing
+  on('turn.complete', async ($, e, next) => {
+    if (e.agentId !== undefined) {
+      return next(e)
+    }
+    const heard = tally
+    tally = emptyTally()
+    const told = await next(e)
+    const line = e.isAborted ? undefined : adjournmentOf(heard)
+    if (line === undefined) {
+      return told
+    }
+    // a line another hook beneath added stays, above the court's
+    return { ...told, text: told.text === e.answer ? line : `${told.text}\n\n${line}` }
+  })
+
   on('prompt.submit', async ($, e, next) => {
     await update($, bandAtom, () => false)
     return next(e)
@@ -524,6 +544,7 @@ export const register: Register = (on, options) => {
       }))
       await update($, bandAtom, () => true)
       await stampRow($, e.tool_use_id, { kind: 'contempt', number: nextCaseNumber(history) })
+      tally.contempt += 1
       const contemptId = lastId
       quietly(
         $.ui.open({ id: PANE, title: 'trial-run · court', columns: DOCK_COLUMNS, rows: INLINE_ROWS }).then(opened =>
@@ -631,6 +652,7 @@ export const register: Register = (on, options) => {
     ])
     timer.abort()
     objections.delete(id)
+    tally[ruling.kind] += 1
     if (ruling.kind === 'guilty') {
       convicted.set(contemptKey, opening.number)
       memory.appealable = { command, charge, key: contemptKey, number: opening.number }

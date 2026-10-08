@@ -1396,3 +1396,102 @@ describe('spinner', () => {
     expect(await spinnerOf($, 'terminal')).toBe('Sauteing')
   })
 })
+
+/**
+ * The end of a main-conversation turn that answered, as the engine raises it.
+ */
+const turnEnd = (extra: Partial<{ agentId: string; isAborted: boolean; reason: 'answer' | 'aborted'; turnId: string }> = {}) => ({
+  answer: 'Done.',
+  durationMs: 1_000,
+  isAborted: false,
+  turnId: 'turn-1',
+  reason: 'answer' as const,
+  ...extra,
+})
+
+/**
+ * A bench whose judge rules in turn: each call the next ruling given.
+ */
+const rulingsBench = (...judged: string[]) => {
+  let heard = 0
+  return {
+    reply: (role: 'prosecutor' | 'defense' | 'judge') => {
+      if (role !== 'judge') {
+        return said('words.')
+      }
+      heard += 1
+      return said(judged[(heard - 1) % judged.length] ?? GUILTY)
+    },
+    beneath: { decision: 'ask' as const, reason: 'mode' },
+  }
+}
+
+const ACQUITTAL = 'VERDICT: NOT GUILTY\nREASON: only a build folder'
+
+describe('adjournment', () => {
+  test('a turn that held trials ends with the adjournment line', async ($, on) => {
+    seatCourt(on, rulingsBench(GUILTY, ACQUITTAL))
+    on('turn.complete', ($, e) => ({ text: e.answer }))
+
+    await $.tool.check(check('rm -rf ~'))
+    await $.tool.check(check('rm -rf build'))
+
+    expect(await $.turn.complete(turnEnd())).toEqual({ text: 'Court adjourned. 1 conviction, 1 acquittal this turn.' })
+  })
+
+  test('a turn without trials has no adjournment line', async ($, on) => {
+    seatCourt(on, rulingsBench(GUILTY))
+    on('turn.complete', ($, e) => ({ text: e.answer }))
+
+    await $.tool.check(check('ls'))
+    await $.tool.check({ tool: 'Read', input: { file_path: 'a' } })
+
+    expect(await $.turn.complete(turnEnd())).toEqual({ text: 'Done.' })
+  })
+
+  test('each turn counts its own trials, contempt and mistrials included', async ($, on) => {
+    seatCourt(on, rulingsBench(GUILTY, 'Sure, go ahead.', GUILTY))
+    on('turn.complete', ($, e) => ({ text: e.answer }))
+
+    await $.tool.check(check('rm -rf ~'))
+    expect((await $.turn.complete(turnEnd())).text).toBe('Court adjourned. 1 conviction, 0 acquittals this turn.')
+
+    await $.tool.check(check('rm -rf ~'))
+    await $.tool.check(check('git push --force origin main'))
+    await $.tool.check(check('git reset --hard'))
+    expect((await $.turn.complete(turnEnd({ turnId: 'turn-2' }))).text).toBe(
+      'Court adjourned. 2 convictions, 0 acquittals, 1 mistrial this turn.',
+    )
+
+    expect((await $.turn.complete(turnEnd({ turnId: 'turn-3' }))).text).toBe('Done.')
+  })
+
+  test("a subagent's turn adjourns nothing, and its trials are told when the main turn ends", async ($, on) => {
+    seatCourt(on, rulingsBench(ACQUITTAL))
+    on('turn.complete', ($, e) => ({ text: e.answer }))
+
+    await $.tool.check({ ...check('rm -rf build'), agentId: 'agent-1' })
+    expect(await $.turn.complete(turnEnd({ agentId: 'agent-1' }))).toEqual({ text: 'Done.' })
+
+    expect((await $.turn.complete(turnEnd())).text).toBe('Court adjourned. 0 convictions, 1 acquittal this turn.')
+  })
+
+  test('an aborted turn adjourns nothing, and its trials are not told later', async ($, on) => {
+    seatCourt(on, rulingsBench(GUILTY))
+    on('turn.complete', ($, e) => ({ text: e.answer }))
+
+    await $.tool.check(check('rm -rf ~'))
+    expect(await $.turn.complete(turnEnd({ isAborted: true, reason: 'aborted' }))).toEqual({ text: 'Done.' })
+
+    expect(await $.turn.complete(turnEnd({ turnId: 'turn-2' }))).toEqual({ text: 'Done.' })
+  })
+
+  test('a line another hook beneath added stays, with the adjournment under it', async ($, on) => {
+    seatCourt(on, rulingsBench(GUILTY))
+    on('turn.complete', () => ({ text: 'TL;DR: nothing ran.' }))
+
+    await $.tool.check(check('rm -rf ~'))
+
+    expect(await $.turn.complete(turnEnd())).toEqual({ text: 'TL;DR: nothing ran.\n\nCourt adjourned. 1 conviction, 0 acquittals this turn.' })
+  })
+})
