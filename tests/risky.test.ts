@@ -115,6 +115,16 @@ describe('risky', () => {
     expect(elapsedOf(long)).toBeLessThan(8 * elapsedOf(short) + 50)
   })
 
+  test('a command line longer than 64 Ki characters is charged as unread without being read', () => {
+    const at = `echo ${'a'.repeat(64 * 1024 - 'echo '.length)}`
+    const over = `${at}a`
+    expect(chargeOf(at)).toBeUndefined()
+    expect(chargeOf(over)?.id).toBe('unread-script')
+    expect(chargeOf(over)?.command === over).toBe(true)
+    expect(isSimpleCommand(over)).toBe(false)
+    expect(elapsedOf(`${run('`a`', 64 * 1024)}x`)).toBeLessThan(100)
+  })
+
   test('global flags before the subcommand do not hide a teardown', () => {
     const cases: readonly (readonly [string, string])[] = [
       ['terraform -chdir=infra destroy -auto-approve', 'terraform-destroy'],

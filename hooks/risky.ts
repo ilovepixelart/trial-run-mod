@@ -967,11 +967,25 @@ export const chargedOf = (command: string): { charge: Charge; words: readonly st
 }
 
 /**
+ * The longest command line the court reads, in characters. Reading is
+ * linear in the length but costs about 15 ms per Ki characters at worst
+ * (a run of backticks or `;`), so a line this long takes up to a second
+ * in the tool.check hook; a longer one is charged as unread, not read. A
+ * `bash -c` script cannot exceed 128 KiB on Linux (MAX_ARG_STRLEN), and
+ * a command line written by hand or by the model is far shorter.
+ */
+const MAX_LINE = 64 * 1024
+
+/**
  * The charge, the words that stand for the charged command, and the words
  * the charge was matched on (those of the command run per file, for a
  * `find -exec`).
  */
 const trialOf = (command: string): { charge: Charge; words: readonly string[]; matched: readonly string[] } | undefined => {
+  if (command.length > MAX_LINE) {
+    const words = command.trim().split(/\s+/)
+    return { charge: { ...UNREAD, command }, words, matched: words }
+  }
   for (const { words, open, text, whole, unread } of segmentsOf(command).flatMap(segment => commandsOf(segment))) {
     if (unread === true) {
       return { charge: { ...UNREAD, command: text }, words, matched: words }
