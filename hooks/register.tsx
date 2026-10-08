@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register, ResultOf } from 'claude-code'
+import type { EngineInterface, Register, RenderInput, ResultOf } from 'claude-code'
 
-import type { CourtRole, CourtTrial, CourtVerdict } from '../types'
+import type { CourtRole, CourtStamp, CourtTrial, CourtVerdict } from '../types'
 import { contemptKeyOfLine } from './contempt'
 import { DOCKET_LAYOUT, casesOf, docketOf, fileCase, isReadableLayout, nextCaseNumber, priorsOf } from './docket'
 import { GIT_ENV, exhibitLinesOf, factsOf, isLexicalPath, namesAlong, planOf, statPathsOf, targetsIn, withModified, withoutTargets } from './exhibits'
@@ -58,6 +58,7 @@ const INLINE_ROWS = 24
 
 const trialAtom = atom({ plugin: 'trial-run', key: 'trial' } as const, null)
 const bandAtom = atom({ plugin: 'trial-run', key: 'isBandShown' } as const, false)
+const stampsAtom = atom({ plugin: 'trial-run', key: 'stamps' } as const, {} as Record<string, CourtStamp>)
 
 const TITLES: Record<CourtRole, string> = {
   prosecutor: 'PROSECUTION',
@@ -396,6 +397,39 @@ const runsOf = (strip: readonly CourtVerdict['kind'][]) =>
     return runs
   }, [])
 
+/**
+ * Marks a denied call's row for its transcript stamp; a check asked without
+ * a call (a query) has no row.
+ */
+const stampRow = async ($: EngineInterface, id: string | undefined, stamp: CourtStamp) => {
+  if (id !== undefined) {
+    await update($, stampsAtom, stamps => ({ ...stamps, [id]: stamp }))
+  }
+}
+
+/**
+ * The transcript stamp of each denied call, `✕ GUILTY · case #0017`.
+ */
+const stampLinesOf = (stamps: readonly CourtStamp[]) =>
+  stamps.map(stamp => ({ kind: stamp.kind, text: `${VERDICT_MARKS[stamp.kind]} ${VERDICT_LABELS[stamp.kind]} · case ${caseNumberOf(stamp.number)}` }))
+
+/**
+ * Claude Code's own drawing of a denied call with its stamps beneath it.
+ */
+const stampedOf = ($: EngineInterface, e: RenderInput<'ToolResult' | 'ToolGroup'>, row: ResultOf['ui.render'], stamps: readonly CourtStamp[]) => {
+  const { Box, Text } = $.ui.resolve(e)
+  return (
+    <Box flexDirection="column">
+      {row}
+      <Box key="transcript-stamp" flexDirection="column" paddingLeft={2}>
+        {stampLinesOf(stamps).map(line => (
+          <Text bold color={VERDICT_COLORS[line.kind]}>{line.text}</Text>
+        ))}
+      </Box>
+    </Box>
+  )
+}
+
 export const register: Register = (on, options) => {
   const settings = settingsOf(options)
   switchCharges(settings.charges)
@@ -484,6 +518,7 @@ export const register: Register = (on, options) => {
         isPlaced: true,
       }))
       await update($, bandAtom, () => true)
+      await stampRow($, e.tool_use_id, { kind: 'contempt', number: nextCaseNumber(history) })
       const contemptId = lastId
       quietly(
         $.ui.open({ id: PANE, title: 'trial-run · court', columns: DOCK_COLUMNS, rows: INLINE_ROWS }).then(opened =>
@@ -594,6 +629,7 @@ export const register: Register = (on, options) => {
     if (ruling.kind === 'guilty') {
       convicted.set(contemptKey, opening.number)
       memory.appealable = { command, charge, key: contemptKey, number: opening.number }
+      await stampRow($, e.tool_use_id, { kind: 'guilty', number: opening.number })
     }
 
     const penalty = ruling.kind === 'guilty' ? sentenceFor(charge.id, charge.command) : undefined
@@ -1005,5 +1041,29 @@ export const register: Register = (on, options) => {
         </Text>
       </Box>
     )
+  })
+
+  // the verdict in the transcript, under Claude Code's own drawing of the
+  // denied call, which it wraps and never replaces: a standalone row draws
+  // the call's result as a ToolResult, a run of calls as one ToolGroup
+  // (folded, or expanded into rows that draw their results inline)
+  on('ui.render', { component: 'ToolResult', props: { tool: 'Bash' } }, async ($, e, next) => {
+    const stamp = (await read($, stampsAtom))[e.requestId]
+    if (stamp === undefined) {
+      return next(e)
+    }
+    return stampedOf($, e, await next(e), [stamp])
+  })
+
+  on('ui.render', { component: 'ToolGroup' }, async ($, e, next) => {
+    const stamps = await read($, stampsAtom)
+    const denied = e.props.calls.flatMap(one => {
+      const stamp = one.tool === 'Bash' && one.tool_use_id !== undefined ? stamps[one.tool_use_id] : undefined
+      return stamp === undefined ? [] : [stamp]
+    })
+    if (denied.length === 0) {
+      return next(e)
+    }
+    return stampedOf($, e, await next(e), denied)
   })
 }

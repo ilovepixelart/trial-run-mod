@@ -45,8 +45,21 @@ export type CourtTrial = {
   isPlaced: boolean
 }
 
+/**
+ * The stamp on a denied Bash call's row in the transcript: the verdict that
+ * denied it and the case it was filed as.
+ */
+export type CourtStamp = { kind: 'guilty' | 'contempt'; number: number }
+
 declare module 'claude-code' {
   interface PluginState {
-    'trial-run': { trial: CourtTrial | null; isBandShown: boolean }
+    'trial-run': {
+      trial: CourtTrial | null
+      isBandShown: boolean
+      /**
+       * The stamps of this session's denied calls, by the call's `tool_use_id`.
+       */
+      stamps: Record<string, CourtStamp>
+    }
   }
 }

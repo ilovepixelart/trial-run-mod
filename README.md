@@ -17,6 +17,7 @@ When Claude reaches for `rm -rf`, a force push or a `DROP TABLE`, court is calle
 3. **The defense** argues that the agent needs it, citing what you and Claude actually said. It has to argue for its client, however hopeless the case.
 4. **ALL RISE.** The gavel comes down, the judge rules, and the verdict drops onto the pane in very large letters, still wet with ink. The frame turns the verdict's colour, and it is read out loud.
 5. **Claude hears the verdict too.** A guilty command is refused with the judge's reason and a **sentence**: one safer way to do the same job, read out under the ruling. Claude tells you the court has ruled and offers you the sentence.
+6. **The verdict stays in the transcript.** The denied Bash call carries a stamp under Claude Code's own row, `✕ GUILTY · case #0017`, or `✕ CONTEMPT · case #0018` for a retry: under the folded `Ran 1 shell command` line, and under the call's result in the full transcript (ctrl+o). Every other row, an acquitted or untried command's included, is drawn as Claude Code draws it.
 
 Claude knows the court sits before it is ever tried: the Bash tool's description ends with two sentences saying that risky commands stand trial and that stating the intent in the same message helps the defense, which quotes Claude's latest words. The notice is added once per session, to the Bash tool only, and not at all with every charge switched off.
 
