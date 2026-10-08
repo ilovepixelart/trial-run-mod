@@ -1070,7 +1070,7 @@ describe('exhibits', () => {
 
     await $.tool.check(check('git push --force origin main'))
 
-    expect(seen.runs).toHaveLength(4)
+    expect(seen.runs).toHaveLength(5)
     for (const run of seen.runs) {
       expect(run.argv.slice(0, 1 + GIT_HARDENING.length)).toEqual(['git', ...GIT_HARDENING])
       expect(run.init).toEqual({ env: { ...GIT_ENV }, timeoutMs: 500 })
@@ -1140,10 +1140,10 @@ const ACQUITTED = 'VERDICT: NOT GUILTY\nREASON: node_modules is reinstalled by n
 const modulesRepo = (isTracked: () => boolean) => (argv: readonly string[]) => {
   const args = argv.slice(1 + GIT_HARDENING.length)
   if (args[0] === 'rev-parse') {
-    return gitSaid('true\n/work/app\n\nmain\n')
+    return gitSaid(args.includes('--verify') ? 'main\n' : 'true\n/work/app\n\n.git/index\n')
   }
-  if (args.includes('--error-unmatch')) {
-    return isTracked() ? gitSaid('node_modules/a\n') : gitSaid('', 1)
+  if (args.includes('--stage')) {
+    return gitSaid(isTracked() ? `100644 ${'a'.repeat(40)} 0\tnode_modules/a\0` : '')
   }
   return gitSaid('')
 }

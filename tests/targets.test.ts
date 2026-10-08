@@ -10,23 +10,31 @@ const ACQUITTED = 'VERDICT: NOT GUILTY\nREASON: build output is disposable'
 const check = (command: string) => ({ tool: 'Bash', input: { command } })
 
 /**
- * What the first query prints in /work/app on main: inside, the top level,
- * the directory within it (none) and the branch.
+ * What the first query prints in /work/app: inside, the top level, the
+ * directory within it (none) and the index file; HEAD names main.
  */
-const HERE = 'true\n/work/app\n\nmain\n.git/index\n'
+const HERE = 'true\n/work/app\n\n.git/index\n'
+const hereSaid = (argv: readonly string[]) => (argv.includes('--verify') ? gitSaid('main\n') : gitSaid(HERE))
+
+const OID = 'a'.repeat(40)
+/** A path the index and HEAD both hold as the same file. */
+const stagedSaid = (path: string) => gitSaid(`100644 ${OID} 0\t${path}\0`)
+const committedSaid = (path: string) => gitSaid(`100644 blob ${OID}\t${path}\0`)
 
 describe('targets the shell reads differently', () => {
   // git that calls every path tracked: the reassuring answer, were it asked
   const reassuring = (argv: readonly string[]) =>
     argv.includes('rev-parse')
-      ? gitSaid(HERE)
+      ? hereSaid(argv)
       : argv.includes('rev-list')
         ? gitSaid('0\n')
-        : argv.includes('--error-unmatch')
-          ? gitSaid('x\n')
-          : argv.includes('config')
-            ? gitSaid('', 1)
-            : gitSaid('')
+        : argv.includes('--stage')
+          ? stagedSaid('x')
+          : argv.includes('ls-tree')
+            ? committedSaid('x')
+            : argv.includes('config')
+              ? gitSaid('', 1)
+              : gitSaid('')
 
   for (const command of [
     'rm -rf "build" src',
@@ -79,10 +87,13 @@ describe('work under a tracked target', () => {
   const clean: Tree = { untracked: '', ignored: '', size: 5 }
   const treeGit = (tree: () => Tree) => (argv: readonly string[]) => {
     if (argv.includes('rev-parse')) {
-      return gitSaid(HERE)
+      return hereSaid(argv)
     }
-    if (argv.includes('--error-unmatch')) {
-      return gitSaid('src/a.txt\n')
+    if (argv.includes('--stage')) {
+      return stagedSaid('src/a.txt')
+    }
+    if (argv.includes('ls-tree')) {
+      return committedSaid('src/a.txt')
     }
     if (argv.includes('--debug')) {
       return gitSaid('src/a.txt\n  ctime: 100:0\n  mtime: 100:250000000\n  dev: 1\tino: 2\n  uid: 1\tgid: 1\n  size: 5\tflags: 0\n')
@@ -166,10 +177,10 @@ describe('work under a tracked target', () => {
     const exactGit = (argv: readonly string[]) => {
       const target = argv.at(-1)
       if (argv.includes('rev-parse')) {
-        return gitSaid(HERE)
+        return hereSaid(argv)
       }
-      if (argv.includes('--error-unmatch')) {
-        return target === 'src' ? gitSaid('src/a.txt\n') : gitSaid('', 1)
+      if (argv.includes('--stage') || argv.includes('ls-tree')) {
+        return target !== 'src' ? gitSaid('') : argv.includes('--stage') ? stagedSaid('src/a.txt') : committedSaid('src/a.txt')
       }
       return argv.includes('--debug') && target === 'src'
         ? gitSaid('src/a.txt\n  ctime: 100:0\n  mtime: 100:250000000\n  dev: 1\tino: 2\n  uid: 1\tgid: 1\n  size: 5\tflags: 0\n')
@@ -232,7 +243,7 @@ describe('work under a tracked target', () => {
 describe('a target behind a symbolic link', () => {
   // cache is an untracked link: git reads nothing under it, wherever it points
   const linkedGit = (argv: readonly string[]) =>
-    argv.includes('rev-parse') ? gitSaid(HERE) : argv.includes('--error-unmatch') ? gitSaid('', 1) : gitSaid('')
+    argv.includes('rev-parse') ? hereSaid(argv) : gitSaid('')
   const linked = (pointsAt: () => string) => (path: string, resolve: boolean) =>
     path.includes('/cache/') && resolve
       ? { kind: 'dir' as const, size: 0, mtimeMs: 0, isLink: false, realPath: `${pointsAt()}/${path.slice(path.indexOf('/cache/') + 7)}` }

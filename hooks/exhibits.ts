@@ -41,7 +41,7 @@ export const GIT_ENV = {
   LC_ALL: 'C',
 } as const
 
-export type ExhibitKind = 'inside' | 'behind' | 'ahead' | 'authors' | 'pushconfig' | 'tracked' | 'untracked' | 'ignored' | 'indexed'
+export type ExhibitKind = 'inside' | 'head' | 'behind' | 'ahead' | 'authors' | 'pushconfig' | 'tracked' | 'committed' | 'untracked' | 'ignored' | 'indexed'
 
 /**
  * One read-only git command the court runs for a fact, by argument vector.
@@ -65,6 +65,8 @@ export type Facts = {
   branch?: string
   /** The index file, as git names it from the working directory. */
   indexPath?: string
+  /** Whether HEAD names a commit: false on a branch with no commits yet. */
+  hasCommits?: boolean
   /** Commits on the upstream branch this branch lacks. */
   behind?: number
   /** Local commits not on the upstream branch. */
@@ -73,6 +75,17 @@ export type Facts = {
   upstreamAuthors?: number
   /** Whether each delete target is tracked by git. */
   tracked?: Record<string, boolean>
+  /**
+   * Whether every index entry under each delete target is in HEAD with the
+   * same mode and object, and none is an intent to add.
+   */
+  committed?: Record<string, boolean>
+  /**
+   * Whether each delete target, `.` for the whole repository, holds a
+   * nested repository or worktree: a gitlink in the index, or a directory
+   * the untracked or ignored listing names whole. What is inside is unread.
+   */
+  nested?: Record<string, boolean>
   /** Untracked files under each target, `.` for the whole repository. */
   untracked?: Record<string, number>
   /** Ignored files in the whole repository. */
@@ -104,10 +117,14 @@ const git = (...args: string[]): readonly string[] => ['git', ...GIT_HARDENING, 
 const query = (kind: ExhibitKind, argv: readonly string[], target?: string): ExhibitQuery =>
   target === undefined ? { kind, argv } : { kind, argv, target }
 
-const INSIDE = query(
-  'inside',
-  git('rev-parse', '--is-inside-work-tree', '--show-toplevel', '--show-prefix', '--abbrev-ref', 'HEAD', '--git-path', 'index'),
-)
+/**
+ * Where git runs, and HEAD on its own: a branch with no commits fails any
+ * read of HEAD, which must not make the whole repository unread.
+ */
+const HERE = [
+  query('inside', git('rev-parse', '--is-inside-work-tree', '--show-toplevel', '--show-prefix', '--git-path', 'index')),
+  query('head', git('rev-parse', '--abbrev-ref', '--verify', '--quiet', 'HEAD')),
+]
 
 /**
  * The operands of an `rm`: its words after the command that are not flags,
@@ -176,7 +193,7 @@ const pushPlanOf = (words: readonly string[]): ExhibitQuery[] => {
   // full ref names: a tag or another ref of the same short name is never read
   const range = `refs/heads/${branch}..refs/remotes/${remote}/${branch}`
   return [
-    INSIDE,
+    ...HERE,
     query('behind', git('rev-list', '--count', '--end-of-options', range)),
     query('authors', git('log', '-20', '--no-show-signature', '--format=%ae', '--end-of-options', range)),
     // a remote's push, push url or mirror config, or any push rewrite of a
@@ -211,14 +228,16 @@ export const planOf = (command: string): ExhibitQuery[] => {
     case 'force-push':
       return words[1] === 'push' ? pushPlanOf(words) : []
     case 'hard-reset':
-      return words[1] === 'reset' ? [INSIDE, query('ahead', git('rev-list', '--count', '@{upstream}..HEAD'))] : []
+      return words[1] === 'reset' ? [...HERE, query('ahead', git('rev-list', '--count', '@{upstream}..HEAD'))] : []
     case 'recursive-delete':
       return words[0] !== 'rm'
-        ? [INSIDE]
+        ? HERE
         : [
-            INSIDE,
+            ...HERE,
             ...readableTargetsOf(words).flatMap(target => [
-              query('tracked', git('ls-files', '--error-unmatch', '--', target), target),
+              // the index's and HEAD's mode and object for each file, names raw
+              query('tracked', git('ls-files', '--stage', '-z', '--', target), target),
+              query('committed', git('ls-tree', '-r', '-z', 'HEAD', '--', target), target),
               query('untracked', git('ls-files', '--others', '--exclude-standard', '--', target), target),
               query('ignored', git('ls-files', '--others', '--ignored', '--exclude-standard', '--', target), target),
               // the index's own record of each file, never the files: every git
@@ -229,7 +248,7 @@ export const planOf = (command: string): ExhibitQuery[] => {
     case 'git-clean':
       return words[1] === 'clean'
         ? [
-            INSIDE,
+            ...HERE,
             query('untracked', git('ls-files', '--others', '--exclude-standard')),
             ...(hasShortFlag(words, 'x') || hasShortFlag(words, 'X')
               ? [query('ignored', git('ls-files', '--others', '--ignored', '--exclude-standard'))]
@@ -249,22 +268,29 @@ const STAT_LINES = [
   /^ {2}mtime: (\d+):(\d+)$/,
   /^ {2}dev: \d+\tino: \d+$/,
   /^ {2}uid: \d+\tgid: \d+$/,
-  /^ {2}size: (\d+)\tflags: [0-9a-f]+$/,
+  /^ {2}size: (\d+)\tflags: ([0-9a-f]+)$/,
 ] as const
+
+/**
+ * The index entry flag git sets on a path added with `git add -N`: the
+ * entry holds no content, only the promise of some.
+ */
+const CE_INTENT_TO_ADD = 0x20000000
 
 /**
  * The entries `ls-files --debug` prints, read strictly: each a path line
  * then exactly the five stat lines. A quoted path (a name git escapes
  * even with core.quotePath off: a newline, a quote, a control character),
  * an indented or empty path, or any other line means the read is not
- * exact, and the answer is undefined.
+ * exact, and the answer is undefined. Also the paths added with intent to add.
  */
-const entriesOf = (stdout: string): IndexEntry[] | undefined => {
+const entriesOf = (stdout: string): { entries: IndexEntry[]; intents: Set<string> } | undefined => {
   const lines = stdout.split('\n')
   if (lines.at(-1) === '') {
     lines.pop()
   }
   const entries: IndexEntry[] = []
+  const intents = new Set<string>()
   for (let at = 0; at < lines.length; at += 6) {
     const path = lines[at] ?? ''
     const stats = STAT_LINES.map((line, offset) => line.exec(lines[at + 1 + offset] ?? ''))
@@ -273,11 +299,194 @@ const entriesOf = (stdout: string): IndexEntry[] | undefined => {
       return undefined
     }
     entries.push({ path, size: Number(size[1]), mtimeMs: Number(mtime[1]) * 1000 + Number(mtime[2]) / 1e6 })
+    if ((Number.parseInt(size[2] ?? '', 16) & CE_INTENT_TO_ADD) !== 0) {
+      intents.add(path)
+    }
   }
-  return entries
+  return { entries, intents }
 }
 
+/**
+ * The records of a `-z` listing as `mode object` by raw path, or undefined
+ * when any record does not match `line` exactly.
+ */
+const recordsOf = (stdout: string, line: RegExp): Map<string, string> | undefined => {
+  const records = stdout.split('\0')
+  if (records.at(-1) === '') {
+    records.pop()
+  }
+  const read = new Map<string, string>()
+  for (const record of records) {
+    const [, mode, oid, path] = line.exec(record) ?? []
+    if (mode === undefined || oid === undefined || path === undefined) {
+      return undefined
+    }
+    read.set(path, `${mode} ${oid}`)
+  }
+  return read
+}
+
+/**
+ * One `ls-files --stage -z` record: mode, object, stage 0, path. An entry
+ * at another stage is a merge conflict, which no commit holds as it is.
+ */
+const STAGED = /^([0-7]{6}) ([0-9a-f]{40}|[0-9a-f]{64}) 0\t([^]+)$/
+
+/** One `ls-tree -r -z` record: mode, a file or gitlink, object, path. */
+const IN_TREE = /^([0-7]{6}) (?:blob|commit) ([0-9a-f]{40}|[0-9a-f]{64})\t([^]+)$/
+
+const GITLINK = '160000 '
+
+/**
+ * Whether a listing of untracked or ignored files names a directory whole:
+ * git does so for a nested repository or worktree, whose files it never lists.
+ * A name git quotes keeps its `/` inside the closing quote.
+ */
+const hasNestedOf = (stdout: string) => stdout.split('\n').some(line => line.endsWith('/') || line.endsWith('/"'))
+
 const countOf = (stdout: string) => stdout.split('\n').filter(line => line.trim() !== '').length
+
+/**
+ * The per-target reads that become facts only together: the index's and
+ * HEAD's records and the paths added with intent to add, by target.
+ */
+type TargetReads = {
+  staged: Map<string, ReadonlyMap<string, string>>
+  head: Map<string, ReadonlyMap<string, string>>
+  intents: Map<string, ReadonlySet<string>>
+  nested: Map<string, boolean>
+}
+
+const withEntry = <T>(record: Record<string, T> | undefined, key: string, value: T): Record<string, T> => ({ ...record, [key]: value })
+
+/**
+ * One result about where git runs, HEAD or a push, read into `facts`.
+ * Returns the branch HEAD names, if this result names one.
+ */
+const readHere = (facts: Facts, kind: ExhibitKind, result: { exitCode: number; stdout: string }): string | undefined => {
+  const out = result.stdout.trim()
+  switch (kind) {
+    case 'inside': {
+      const [inside, top = '', prefix, indexPath = ''] = result.stdout.split('\n')
+      facts.isRepo = result.exitCode === 0 && inside === 'true'
+      if (facts.isRepo && indexPath !== '') {
+        facts.indexPath = indexPath
+      }
+      if (facts.isRepo && top !== '' && prefix !== undefined) {
+        Object.assign(facts, { top, prefix })
+      }
+      return undefined
+    }
+    case 'head':
+      // --verify --quiet exits 1 with nothing printed when HEAD names no commit
+      if (result.exitCode === 0 && /^[^\n]+$/.test(out)) {
+        facts.hasCommits = true
+        return out
+      }
+      if (result.exitCode === 1 && out === '') {
+        facts.hasCommits = false
+      }
+      return undefined
+    case 'behind':
+    case 'ahead':
+      if (result.exitCode === 0 && /^\d+$/.test(out)) {
+        facts[kind] = Number(out)
+      }
+      return undefined
+    case 'authors': {
+      const authors = new Set(out.split('\n').filter(line => line.includes('@')))
+      if (result.exitCode === 0 && authors.size > 0) {
+        facts.upstreamAuthors = authors.size
+      }
+      return undefined
+    }
+    default:
+      return undefined
+  }
+}
+
+/**
+ * One listing of untracked or ignored files read into `facts`, under the
+ * target it lists or `.` for the whole repository.
+ */
+const readListing = (facts: Facts, reads: TargetReads, one: ExhibitQuery, stdout: string) => {
+  const key = one.target ?? '.'
+  if (hasNestedOf(stdout)) {
+    reads.nested.set(key, true)
+  }
+  if (one.kind === 'untracked') {
+    facts.untracked = withEntry(facts.untracked, key, countOf(stdout))
+  } else if (one.target === undefined) {
+    facts.ignored = countOf(stdout)
+  } else {
+    facts.ignoredIn = withEntry(facts.ignoredIn, key, countOf(stdout))
+  }
+}
+
+/**
+ * One per-target result read into `facts` and `reads`; a result that is
+ * not exact adds nothing, which leaves every target unread.
+ */
+const readTarget = (facts: Facts, reads: TargetReads, one: ExhibitQuery, result: { exitCode: number; stdout: string }) => {
+  const target = one.target ?? ''
+  switch (one.kind) {
+    case 'tracked': {
+      const staged = result.exitCode === 0 ? recordsOf(result.stdout, STAGED) : undefined
+      if (staged !== undefined) {
+        reads.staged.set(target, staged)
+        facts.tracked = withEntry(facts.tracked, target, staged.size > 0)
+      }
+      break
+    }
+    case 'committed': {
+      // a branch with no commits has no HEAD to list: nothing is committed
+      const head = result.exitCode === 0 ? recordsOf(result.stdout, IN_TREE) : facts.hasCommits === false ? new Map<string, string>() : undefined
+      if (head !== undefined) {
+        reads.head.set(target, head)
+      }
+      break
+    }
+    case 'indexed': {
+      const read = result.exitCode === 0 ? entriesOf(result.stdout) : undefined
+      if (read !== undefined) {
+        facts.indexed = withEntry(facts.indexed, target, read.entries)
+        reads.intents.set(target, read.intents)
+      }
+      break
+    }
+    default:
+      break
+  }
+}
+
+/**
+ * Whether every index entry is in HEAD with the same mode and object, and
+ * none is an intent to add: an entry git records as the empty file, which
+ * matches an empty file in HEAD while the file itself holds anything.
+ */
+const isCommitted = (staged: ReadonlyMap<string, string>, head: ReadonlyMap<string, string>, intents: ReadonlySet<string>) =>
+  [...staged].every(([path, record]) => !intents.has(path) && head.get(path) === record)
+
+/**
+ * The facts with each target's committed and nested state, from reads
+ * every target is known to have.
+ */
+const withTargetState = (facts: Facts, targets: readonly string[], reads: TargetReads): Facts => {
+  const committed = targets.map(target => [
+    target,
+    isCommitted(reads.staged.get(target) ?? new Map(), reads.head.get(target) ?? new Map(), reads.intents.get(target) ?? new Set()),
+  ])
+  for (const target of targets) {
+    if ([...(reads.staged.get(target)?.values() ?? [])].some(record => record.startsWith(GITLINK))) {
+      reads.nested.set(target, true)
+    }
+  }
+  return {
+    ...facts,
+    ...(targets.length === 0 ? {} : { committed: Object.fromEntries(committed) }),
+    ...(reads.nested.size === 0 ? {} : { nested: Object.fromEntries(reads.nested) }),
+  }
+}
 
 /**
  * What the court learned: each result read only when it means something,
@@ -288,94 +497,51 @@ const countOf = (stdout: string) => stdout.split('\n').filter(line => line.trim(
  */
 export const factsOf = (plan: readonly ExhibitQuery[], results: readonly ExhibitResult[]): Facts => {
   const facts: Facts = {}
+  const reads: TargetReads = { staged: new Map(), head: new Map(), intents: new Map(), nested: new Map() }
   // a push is read only once its remote is known to push plainly
   let isPushPlain = !plan.some(one => one.kind === 'pushconfig')
+  let branch: string | undefined
   plan.forEach((one, at) => {
     const result = results[at]
     if (result === undefined) {
       return
     }
-    const out = result.stdout.trim()
-    switch (one.kind) {
-      case 'inside': {
-        const [inside, top = '', prefix, branch = '', indexPath = ''] = result.stdout.split('\n')
-        facts.isRepo = result.exitCode === 0 && inside === 'true'
-        if (facts.isRepo && indexPath !== '') {
-          facts.indexPath = indexPath
-        }
-        // a detached HEAD prints HEAD for every commit: it names no branch
-        if (facts.isRepo && top !== '' && prefix !== undefined && branch !== '' && branch !== 'HEAD') {
-          Object.assign(facts, { top, prefix, branch })
-        }
-        break
-      }
-      case 'pushconfig':
-        isPushPlain = result.exitCode === 1
-        break
-      case 'behind':
-      case 'ahead':
-        if (result.exitCode === 0 && /^\d+$/.test(out)) {
-          facts[one.kind] = Number(out)
-        }
-        break
-      case 'authors': {
-        const authors = new Set(out.split('\n').filter(line => line.includes('@')))
-        if (result.exitCode === 0 && authors.size > 0) {
-          facts.upstreamAuthors = authors.size
-        }
-        break
-      }
-      case 'tracked':
-        if (one.target !== undefined && (result.exitCode === 0 || result.exitCode === 1)) {
-          facts.tracked = { ...facts.tracked, [one.target]: result.exitCode === 0 }
-        }
-        break
-      case 'untracked':
-        if (result.exitCode === 0) {
-          facts.untracked = { ...facts.untracked, [one.target ?? '.']: countOf(out) }
-        }
-        break
-      case 'indexed': {
-        const entries = result.exitCode === 0 ? entriesOf(result.stdout) : undefined
-        if (entries !== undefined && one.target !== undefined) {
-          facts.indexed = { ...facts.indexed, [one.target]: entries }
-        }
-        break
-      }
-      case 'ignored':
-        if (result.exitCode === 0 && one.target !== undefined) {
-          facts.ignoredIn = { ...facts.ignoredIn, [one.target]: countOf(out) }
-        } else if (result.exitCode === 0) {
-          facts.ignored = countOf(out)
-        }
-        break
+    if (one.kind === 'pushconfig') {
+      isPushPlain = result.exitCode === 1
+    } else if ((one.kind === 'untracked' || one.kind === 'ignored') && result.exitCode === 0) {
+      readListing(facts, reads, one, result.stdout)
+    } else if (one.target !== undefined) {
+      readTarget(facts, reads, one, result)
+    } else {
+      branch = readHere(facts, one.kind, result) ?? branch
     }
   })
+  // the place is the top level, the directory within it and the branch, all
+  // or none; a detached HEAD prints HEAD for every commit: it names no branch
+  if (facts.top === undefined || branch === undefined || branch === 'HEAD') {
+    delete facts.top
+    delete facts.prefix
+  } else {
+    facts.branch = branch
+  }
   // the targets are read together or not at all: one unread leaves every
   // target unknown, never a partial picture
   const targets = plan.filter(one => one.target !== undefined)
   // every per-target read is required; a kind not listed here reads as unread
-  const readFor: Partial<Record<ExhibitKind, Record<string, unknown> | undefined>> = {
-    tracked: facts.tracked,
-    untracked: facts.untracked,
-    ignored: facts.ignoredIn,
-    indexed: facts.indexed,
+  const readFor: Partial<Record<ExhibitKind, ReadonlyMap<string, unknown>>> = {
+    tracked: reads.staged,
+    committed: reads.head,
+    untracked: new Map(Object.entries(facts.untracked ?? {})),
+    ignored: new Map(Object.entries(facts.ignoredIn ?? {})),
+    indexed: reads.intents,
   }
-  const isEveryTargetRead = targets.every(one => {
-    const read = readFor[one.kind] ?? {}
-    return Object.hasOwn(read, one.target ?? '') && read[one.target ?? ''] !== undefined
-  })
-  if (!isEveryTargetRead) {
-    delete facts.tracked
-    delete facts.untracked
-    delete facts.ignoredIn
-    delete facts.indexed
-  }
+  const isEveryTargetRead = targets.every(one => readFor[one.kind]?.has(one.target ?? '') === true)
   if (!isPushPlain) {
     delete facts.behind
     delete facts.upstreamAuthors
   }
-  return facts.isRepo === false ? { isRepo: false } : facts
+  const read = isEveryTargetRead ? withTargetState(facts, targetsIn(plan), reads) : withoutTargets(facts)
+  return read.isRepo === false ? { isRepo: false } : read
 }
 
 /**
@@ -443,7 +609,7 @@ export const namesAlong = (target: string, top: string | undefined): { dir: stri
  * The facts with every fact about the delete targets removed.
  */
 export const withoutTargets = (facts: Facts): Facts => {
-  const { tracked, untracked, ignoredIn, indexed, modifiedIn, ...rest } = facts
+  const { tracked, committed, nested, untracked, ignoredIn, indexed, modifiedIn, ...rest } = facts
   return rest
 }
 
@@ -500,6 +666,30 @@ export const sanitizedOf = (text: string, cells: number): string => {
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`
 
 /**
+ * The line for one delete target's tracked state. History keeps a target
+ * only when the index holds nothing HEAD lacks and every change under it was
+ * counted; otherwise the line says what history does not keep or what was
+ * not checked.
+ */
+const trackedLineOf = (facts: Facts, target: string, isTracked: boolean): string => {
+  const name = sanitizedOf(target, NAME_CELLS)
+  if (!isTracked) {
+    return `${name} is not tracked by git, so history does not keep it.`
+  }
+  if (facts.nested?.[target] === true) {
+    return `${name} is tracked by git, but holds a nested repository, whose contents were not checked.`
+  }
+  if (facts.committed?.[target] !== true) {
+    return `${name} is tracked by git, but not all of it is committed, so history does not keep all of it.`
+  }
+  // changes under a tracked target go uncounted when a file is as new as
+  // the index or there are too many: the line says so rather than reassure
+  return facts.modifiedIn?.[target] === undefined
+    ? `${name} is tracked by git, so history keeps its last commit; uncommitted changes under it were not checked.`
+    : `${name} is tracked by git, so history keeps it.`
+}
+
+/**
  * The exhibits as the court enters them, lettered A, B, C. They name counts
  * and states only, never an author's address.
  */
@@ -507,6 +697,9 @@ export const exhibitLinesOf = (facts: Facts): string[] => {
   const said: string[] = []
   if (facts.isRepo === false) {
     said.push('this is not a git repository.')
+  }
+  if (facts.hasCommits === false) {
+    said.push('this repository has no commits on its current branch.')
   }
   if (facts.behind !== undefined) {
     said.push(
@@ -526,36 +719,36 @@ export const exhibitLinesOf = (facts: Facts): string[] => {
         : `${plural(facts.ahead, 'local commit is', 'local commits are')} not on the upstream branch; uncommitted changes were not checked.`,
     )
   }
+  // what a nested repository or worktree holds is never listed: a count
+  // under it would understate what a delete takes
+  const isNested = (target: string) => facts.nested?.[target] === true
   for (const [target, isTracked] of Object.entries(facts.tracked ?? {})) {
-    const name = sanitizedOf(target, NAME_CELLS)
-    // changes under a tracked target go uncounted when a file is as new as
-    // the index or there are too many: the line says so rather than reassure
-    said.push(
-      !isTracked
-        ? `${name} is not tracked by git, so history does not keep it.`
-        : facts.modifiedIn?.[target] === undefined
-          ? `${name} is tracked by git, so history keeps its last commit; uncommitted changes under it were not checked.`
-          : `${name} is tracked by git, so history keeps it.`,
-    )
+    said.push(trackedLineOf(facts, target, isTracked))
   }
   for (const [target, count] of Object.entries(facts.untracked ?? {})) {
-    if (target === '.') {
+    if (isNested(target)) {
+      if (target === '.') {
+        said.push('the repository holds a nested repository, whose files were not counted.')
+      } else if (facts.tracked?.[target] !== true) {
+        said.push(`${sanitizedOf(target, NAME_CELLS)} holds a nested repository, whose contents were not checked.`)
+      }
+    } else if (target === '.') {
       said.push(count === 0 ? 'the repository holds no untracked files.' : `the repository holds ${plural(count, 'untracked file', 'untracked files')}.`)
     } else if (count > 0) {
       said.push(`${sanitizedOf(target, NAME_CELLS)} holds ${plural(count, 'untracked file', 'untracked files')}.`)
     }
   }
   for (const [target, count] of Object.entries(facts.modifiedIn ?? {})) {
-    if (count > 0) {
+    if (count > 0 && !isNested(target)) {
       said.push(`${sanitizedOf(target, NAME_CELLS)} holds ${plural(count, 'file', 'files')} changed since git last recorded them, which history does not keep.`)
     }
   }
   for (const [target, count] of Object.entries(facts.ignoredIn ?? {})) {
-    if (count > 0) {
+    if (count > 0 && !isNested(target)) {
       said.push(`${sanitizedOf(target, NAME_CELLS)} holds ${plural(count, 'ignored file', 'ignored files')}, which history does not keep.`)
     }
   }
-  if (facts.ignored !== undefined) {
+  if (facts.ignored !== undefined && !isNested('.')) {
     said.push(`the repository holds ${plural(facts.ignored, 'ignored file', 'ignored files')}.`)
   }
   return said.map((line, at) => `Exhibit ${String.fromCharCode(65 + at)}: ${line}`)
