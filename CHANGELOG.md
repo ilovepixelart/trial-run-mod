@@ -2,6 +2,12 @@
 
 All notable changes to trial-run. Versions follow [Semantic Versioning](https://semver.org): while the version is 0.y.z, anything may change between releases. The public surface is the `/court` commands, the charges, the verdict-to-decision mapping and the saved docket layout.
 
+## [Unreleased]
+
+### Changed
+
+- A command run inside a container is now tried as itself: `docker exec`, `docker container exec`, `docker compose exec`, `docker-compose exec`, `podman exec`, `nerdctl exec` and `kubectl exec ... --` are looked through, their options and the container or service name skipped. In 0.1.0, `docker compose exec db psql -c "TRUNCATE orders"` and `docker compose exec db rm -rf /var/lib/postgresql/data` ran with no trial. Commands that were left to your permission rules before may now go to trial first; a harmless command inside a container (`docker compose exec db psql -c "SELECT 1"`) is still not charged.
+
 ## [0.1.0] - 2026-10-08
 
 First release. Requires Claude Code 2.1.287 or later.

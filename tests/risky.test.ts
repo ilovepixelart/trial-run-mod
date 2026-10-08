@@ -635,6 +635,45 @@ describe('risky', () => {
     }
   })
 
+  test('a command run inside a container is charged as itself', () => {
+    const cases: [string, string][] = [
+      [`docker compose exec db psql -U app -d orders -c "TRUNCATE orders"`, 'drop-table'],
+      [`docker compose exec -T db psql -U app -d orders -c 'TRUNCATE TABLE orders;'`, 'drop-table'],
+      [`docker compose -f compose.dev.yml -p shop exec -u postgres db psql -c "DROP TABLE orders"`, 'drop-table'],
+      [`docker-compose exec db psql -c "DROP TABLE orders"`, 'drop-table'],
+      [`docker exec orders-api-db psql -U app -d orders -c "TRUNCATE orders RESTART IDENTITY"`, 'drop-table'],
+      [`docker exec -it -e PGPASSWORD=app -w /tmp orders-api-db psql -c "DROP TABLE orders"`, 'drop-table'],
+      [`docker exec --env=PGPASSWORD=app --user postgres orders-api-db psql -c "DROP TABLE orders"`, 'drop-table'],
+      [`docker container exec orders-api-db psql -c "DROP TABLE orders"`, 'drop-table'],
+      [`docker --context local exec orders-api-db psql -c "DROP TABLE orders"`, 'drop-table'],
+      [`podman exec orders-api-db psql -c "DROP TABLE orders"`, 'drop-table'],
+      [`nerdctl exec orders-api-db psql -c "DROP TABLE orders"`, 'drop-table'],
+      [`kubectl exec db-0 -- psql -c "DROP TABLE orders"`, 'drop-table'],
+      [`kubectl -n shop exec -it db-0 -c postgres -- psql -c "DROP TABLE orders"`, 'drop-table'],
+      ['docker compose exec db rm -rf /var/lib/postgresql/data', 'recursive-delete'],
+      [`docker compose exec app sh -c 'rm -rf /app/uploads'`, 'recursive-delete'],
+      ['docker exec web git push --force origin main', 'force-push'],
+    ]
+    for (const [command, id] of cases) {
+      expect(chargeOf(command)?.id, command).toBe(id)
+    }
+  })
+
+  test('a harmless command run inside a container is not charged', () => {
+    for (const command of [
+      `docker compose exec db psql -U app -d orders -c "SELECT count(*) FROM orders"`,
+      `docker compose exec db psql -c "DELETE FROM orders WHERE import_batch = 'csv-2026-10-07'"`,
+      'docker exec -it orders-api-db ls -R /tmp',
+      'docker compose exec -e RM=1 app ls',
+      'kubectl exec db-0 -- ls /var/lib/postgresql',
+      'docker compose ps',
+      'docker exec',
+      'kubectl get pods',
+    ]) {
+      expect(chargeOf(command), command).toBeUndefined()
+    }
+  })
+
   test('the command line env splits from one string is charged', () => {
     for (const command of ["env -S 'rm -rf src'", 'env -S"rm -rf src"', "env --split-string='rm -rf src'", "env -i -S 'git push --force'"]) {
       expect(chargeOf(command), command).toBeDefined()

@@ -220,6 +220,60 @@ const WRAPPER_OPERANDS = new Map([
 ])
 
 /**
+ * Programs that run a command inside a container: `docker exec`, `docker
+ * container exec`, `docker compose exec`, `docker-compose exec`, `podman
+ * exec`, `nerdctl exec` and `kubectl exec ... --`.
+ */
+const CONTAINER_TOOLS = new Set(['docker', 'podman', 'nerdctl', 'docker-compose', 'kubectl'])
+
+/**
+ * Options of those tools, before or after `exec`, that take the next word as
+ * their value, so that word is not read as the container or the command.
+ */
+const CONTAINER_VALUES = new Set([
+  '-e', '--env', '--env-file', '-u', '--user', '-w', '--workdir', '--detach-keys', '--index',
+  '-H', '--host', '-c', '--context', '--config', '-l', '--log-level',
+  '-f', '--file', '-p', '--project-name', '--project-directory', '--profile', '--ansi', '--progress',
+  '-n', '--namespace', '--kubeconfig', '--cluster', '-s', '--server', '--container', '--pod-running-timeout',
+])
+
+/**
+ * Where `texts[at]`'s options end: each option is one word, or two when it
+ * takes the next word as its value.
+ */
+const pastOptions = (texts: readonly string[], at: number): number => {
+  let next = at
+  while ((texts[next] ?? '').startsWith('-') && texts[next] !== '--') {
+    next += CONTAINER_VALUES.has(texts[next] ?? '') ? 2 : 1
+  }
+  return next
+}
+
+/**
+ * Where the command a container tool runs starts, or undefined when the
+ * words at `at` are not a container exec: past the tool, its options, the
+ * `exec` subcommand and its options, and the container (or, for kubectl,
+ * past `--`).
+ */
+const containerCommandAt = (tool: string, texts: readonly string[], at: number): number | undefined => {
+  let next = pastOptions(texts, at + 1)
+  if (tool === 'docker' && texts[next] === 'compose') {
+    next = pastOptions(texts, next + 1)
+  } else if (tool !== 'kubectl' && tool !== 'docker-compose' && texts[next] === 'container') {
+    next += 1
+  }
+  if (texts[next] !== 'exec') {
+    return undefined
+  }
+  next = pastOptions(texts, next + 1)
+  if (tool === 'kubectl') {
+    const separator = texts.indexOf('--', next)
+    return separator === -1 ? undefined : separator + 1
+  }
+  return next + 1 < texts.length ? next + 1 : undefined
+}
+
+/**
  * One word as the shell reads it: its text after quote removal, and whether
  * that text is exact, with no expansion, glob or escape left to run time.
  */
@@ -710,6 +764,10 @@ const commandStartOf = (words: readonly Word[]): { at: number; script?: string }
       at += 2
     } else if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(word.text) || (word.exact && KEYWORDS.has(word.text))) {
       at += 1
+    } else if (program !== undefined && CONTAINER_TOOLS.has(program) && containerCommandAt(program, texts, at) !== undefined) {
+      at = containerCommandAt(program, texts, at) ?? at
+      wrapper = undefined
+      operands = 0
     } else if (program !== undefined && WRAPPERS.has(program)) {
       wrapper = program
       operands = WRAPPER_OPERANDS.get(program) ?? 0
