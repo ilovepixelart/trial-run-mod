@@ -11,7 +11,10 @@ export type Role = 'prosecutor' | 'defense' | 'judge'
  */
 export type Bench = {
   reply: (role: Role) => ModelCompleteResult | Promise<ModelCompleteResult>
-  beneath?: ResultOf['tool.check']
+  /**
+   * The session's own verdict, or how it answers each time it is asked.
+   */
+  beneath?: ResultOf['tool.check'] | (() => ResultOf['tool.check'])
   /**
    * The transcript the court reads its evidence from; empty when absent.
    */
@@ -107,7 +110,7 @@ export const seatCourt = (on: On, bench: Bench): Record => {
     record.systems[role] = e.system
     return { value: await bench.reply(role) }
   })
-  on('tool.check', () => bench.beneath ?? { decision: 'allow' })
+  on('tool.check', () => (typeof bench.beneath === 'function' ? bench.beneath() : (bench.beneath ?? { decision: 'allow' })))
   on('session.messages', () => ({ value: bench.messages ?? [] }))
   on('ui.open', ($, e) => {
     record.opened.push(e.id)

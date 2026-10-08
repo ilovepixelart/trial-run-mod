@@ -108,16 +108,32 @@ const SPOKEN: Record<CourtVerdict['kind'], string> = {
   contempt: 'Contempt of court.',
 }
 
+const COURT_FAILED: ResultOf['tool.check'] = {
+  decision: 'ask',
+  reason: 'Mistrial! The court of the trial-run plugin failed, so it goes back to the permission prompt.',
+}
+
+/**
+ * What a check the court failed decides: a deny from the rules beneath
+ * stands, anything else asks the person. The command is not read again:
+ * reading it may be what failed.
+ *
+ * @param beneath asks the rules beneath
+ */
+export const failedCheckOf = async (beneath: () => Promise<ResultOf['tool.check']>): Promise<ResultOf['tool.check']> => {
+  try {
+    const decided = await beneath()
+    return decided.decision === 'deny' ? decided : COURT_FAILED
+  } catch {
+    return COURT_FAILED
+  }
+}
+
 const commandOf = (input: unknown): string | undefined => {
   if (typeof input !== 'object' || input === null || !('command' in input)) {
     return undefined
   }
   return typeof input.command === 'string' ? input.command : undefined
-}
-
-const chargeLabelOf = (input: unknown): string | undefined => {
-  const command = commandOf(input)
-  return command === undefined ? undefined : chargeOf(command)?.label
 }
 
 const testimonyFrom = async ($: EngineInterface) => {
@@ -586,20 +602,7 @@ export const register: Register = on => {
     quietly($.audio.play({ asset: GAVEL_SOUND }))
     quietly($.audio.speak(SPOKEN[ruling.kind]))
     return sentence
-  }).catch(async ($, e, next): Promise<ResultOf['tool.check']> => {
-    try {
-      const beneath = await next(e)
-      const label = chargeLabelOf(e.input)
-      return label === undefined
-        ? beneath
-        : sentenceOf({ kind: 'hung', reason: 'the court failed' }, beneath, label)
-    } catch {
-      return {
-        decision: 'ask',
-        reason: 'Mistrial! The court of the trial-run plugin failed, so it goes back to the permission prompt.',
-      }
-    }
-  })
+  }).catch(($, e, next) => failedCheckOf(() => next(e)))
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const els = $.ui.resolve(e)

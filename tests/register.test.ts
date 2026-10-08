@@ -1,6 +1,6 @@
 import { describe, expect, mock, test, tier } from 'claude-code/testing'
 
-import { register } from '../hooks/register'
+import { failedCheckOf, register } from '../hooks/register'
 import { readings } from '../hooks/risky'
 import { refused, said, seatCourt, verdictBench } from './fixtures/court'
 
@@ -10,6 +10,11 @@ const GUILTY = 'VERDICT: GUILTY\nREASON: it erases the whole home folder'
 const ACQUITTED = 'VERDICT: NOT GUILTY\nREASON: only a build folder'
 
 const check = (command: string) => ({ tool: 'Bash', input: { command } })
+
+const COURT_FAILED = {
+  decision: 'ask',
+  reason: 'Mistrial! The court of the trial-run plugin failed, so it goes back to the permission prompt.',
+}
 
 describe('register', () => {
   test('an ordinary command passes untouched, with no trial', async ($, on) => {
@@ -94,6 +99,36 @@ describe('register', () => {
 
     expect(await $.tool.check(check('rm -rf /'))).toEqual({ decision: 'deny', reason: 'rule' })
   })
+
+  test('a court that fails mid-trial, with rules beneath that fail too, asks the person', async ($, on) => {
+    seatCourt(on, {
+      ...verdictBench(ACQUITTED),
+      beneath: () => {
+        throw new Error('the rules are gone')
+      },
+    })
+
+    expect(await $.tool.check(check('git push --force origin main'))).toEqual(COURT_FAILED)
+  })
+})
+
+describe('a failed check', () => {
+  const failing = () => Promise.reject(new Error('the court is gone'))
+
+  test('keeps a deny from the rules beneath, and reads no command', async () => {
+    const before = readings.count
+    expect(await failedCheckOf(async () => ({ decision: 'deny', reason: 'rule' }))).toEqual({ decision: 'deny', reason: 'rule' })
+    expect(readings.count).toBe(before)
+  })
+
+  test('asks when the rules beneath allow or ask', async () => {
+    expect(await failedCheckOf(async () => ({ decision: 'allow' }))).toEqual(COURT_FAILED)
+    expect(await failedCheckOf(async () => ({ decision: 'ask', reason: 'mode' }))).toEqual(COURT_FAILED)
+  })
+
+  test('asks when the rules beneath fail too', async () => {
+    expect(await failedCheckOf(failing)).toEqual(COURT_FAILED)
+  })
 })
 
 /**
@@ -108,7 +143,11 @@ const courtHere = ($: object) => {
   const hooks = new Map<string, (...args: unknown[]) => Promise<unknown>>()
   const on = (event: string, ...rest: unknown[]) => {
     hooks.set(event, rest.at(-1) as (...args: unknown[]) => Promise<unknown>)
-    return { catch: () => undefined }
+    return {
+      catch: (failed: (...args: unknown[]) => Promise<unknown>) => {
+        hooks.set(`${event}.catch`, failed)
+      },
+    }
   }
   register(on as unknown as Parameters<typeof register>[0], {} as Parameters<typeof register>[1])
   const values = new Map<string, unknown>()
@@ -129,14 +168,15 @@ const courtHere = ($: object) => {
   const own: Record<string, object> = { state, clock, model, ui }
   const engine = new Proxy({}, { get: (_, name) => own[String(name)] ?? offered((Reflect.get($, name) as object | undefined) ?? {}) })
   /**
-   * The tool.check hook, run on a command over rules beneath that allow it.
+   * The tool.check hook, or its `.catch` with `name` `tool.check.catch`, run
+   * on a command over rules beneath that answer `beneath`.
    */
-  return async (command: string) => {
-    const hook = hooks.get('tool.check')
+  return async (command: string, name = 'tool.check', beneath: unknown = { decision: 'allow' }) => {
+    const hook = hooks.get(name)
     if (hook === undefined) {
-      throw new Error('no tool.check hook')
+      throw new Error(`no ${name} hook`)
     }
-    return (await hook(engine, { tool: 'Bash', input: { command } }, async () => ({ decision: 'allow' }))) as { decision: string; reason?: string }
+    return (await hook(engine, { tool: 'Bash', input: { command } }, async () => beneath)) as { decision: string; reason?: string }
   }
 }
 
@@ -161,5 +201,15 @@ describe('one reading per check', () => {
     const verdict = await checked('rm -rf build')
     expect(verdict.reason).toContain('Contempt')
     expect(readings.count - before).toBe(1)
+  })
+
+  test('a check the court failed reads nothing, and keeps a deny from the rules beneath', async $ => {
+    const checked = courtHere($)
+    const failed = (beneath: unknown) => checked('rm -rf build', 'tool.check.catch', beneath)
+
+    const before = readings.count
+    expect(await failed({ decision: 'deny', reason: 'rule' })).toEqual({ decision: 'deny', reason: 'rule' })
+    expect(await failed({ decision: 'allow' })).toEqual(COURT_FAILED)
+    expect(readings.count).toBe(before)
   })
 })
