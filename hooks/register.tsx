@@ -110,6 +110,15 @@ const SPOKEN: Record<CourtVerdict['kind'], string> = {
   contempt: 'Contempt of court.',
 }
 
+/**
+ * What Claude reads at the end of the Bash tool's description: two
+ * sentences, under 200 characters, so the agent knows the court sits and
+ * that its own words reach the defense.
+ */
+export const COURT_NOTICE =
+  ' Risky commands (recursive deletes, force pushes, hard resets and the like) stand trial before they run.' +
+  ' State your intent in the same message as the command: the defense quotes it.'
+
 const COURT_FAILED: ResultOf['tool.check'] = {
   decision: 'ask',
   reason: 'Mistrial! The court of the trial-run plugin failed, so it goes back to the permission prompt.',
@@ -434,6 +443,13 @@ export const register: Register = (on, options) => {
     }
     await $.ui.open({ id: PANE, title: 'trial-run · court', columns: DOCK_COLUMNS, rows: INLINE_ROWS })
     return { text: 'The court is open.' }
+  })
+
+  // the engine asks once per session and caches the answer; the notice is
+  // added to what lies beneath, so asking again never adds it twice
+  on('tool.describe', { tool: 'Bash' }, async ($, e, next) => {
+    const described = await next(e)
+    return settings.charges?.size === 0 ? described : { ...described, description: `${described.description}${COURT_NOTICE}` }
   })
 
   on('prompt.submit', async ($, e, next) => {

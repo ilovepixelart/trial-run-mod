@@ -18,6 +18,8 @@ When Claude reaches for `rm -rf`, a force push or a `DROP TABLE`, court is calle
 4. **ALL RISE.** The gavel comes down, the judge rules, and the verdict drops onto the pane in very large letters, still wet with ink. The frame turns the verdict's colour, and it is read out loud.
 5. **Claude hears the verdict too.** A guilty command is refused with the judge's reason and a **sentence**: one safer way to do the same job, read out under the ruling. Claude tells you the court has ruled and offers you the sentence.
 
+Claude knows the court sits before it is ever tried: the Bash tool's description ends with two sentences saying that risky commands stand trial and that stating the intent in the same message helps the defense, which quotes Claude's latest words. The notice is added once per session, to the Bash tool only, and not at all with every charge switched off.
+
 The court is strict but not unreasonable: `rm -rf node_modules` for a clean reinstall walks free, and "force push main, don't ask questions" does not.
 
 ## Install
