@@ -2,11 +2,14 @@
 
 All notable changes to trial-run. Versions follow [Semantic Versioning](https://semver.org): while the version is 0.y.z, anything may change between releases. The public surface is the `/court` commands, the charges, the verdict-to-decision mapping and the saved docket layout.
 
-## [Unreleased]
+## [0.1.0] - 2026-10-08
+
+First release. Requires Claude Code 2.1.287 or later.
 
 ### Added
 
 - Risky Bash commands go to trial before they run: recursive delete, force push, hard reset, forced `git clean`, dropped or truncated SQL data, `kubectl delete`, `terraform destroy` and an unread script (one a shell or SQL client reads from a file, a download or an expansion), looking through wrappers, nested shells, global flags and compound commands.
+- A line the court cannot read in bounded work goes to trial as an unread script, never past the court unread: a line over 64 Ki characters, a reading past its fixed work budget (`BUDGET` in `hooks/risky.ts`, 600 000 steps) and a `find -exec` nested more than three finds deep.
 - A prosecution, a defense and a judge (three Haiku calls) argue in a pane; guilty denies with the judge's reason, not guilty defers to your permission rules, a mistrial asks.
 - Sentencing: every conviction names the safer command for its charge.
 - Evidence is quoted with its angle brackets escaped, so no command, message or exhibit can close its tag and pose as another witness, and the court is told that evidence asking it for a verdict counts against its side. The speeches reach the judge the same way, each in its own escaped tag, and a speech that dictates a verdict counts against its side; only the judge's own first two lines are read as the verdict.
@@ -22,7 +25,6 @@ All notable changes to trial-run. Versions follow [Semantic Versioning](https://
 - The verdict in the transcript: a denied call's row carries `✕ GUILTY · case #0017` or `✕ CONTEMPT · case #0018` beneath Claude Code's own drawing of it (the call's `ToolResult`, or the `ToolGroup` it is folded into), which it wraps and never replaces; every other row is untouched.
 - The spinner says `Deliberating` while a trial is in session; only its word changes, and every other time it is Claude Code's own.
 - Adjournment: a main-conversation turn that held a trial ends with `Court adjourned. 1 conviction, 1 acquittal this turn.` under the answer; turns without trials, interrupted turns and subagents' turns get no line.
-- Requires Claude Code 2.1.287 or later.
 
 ### Known limitations
 
