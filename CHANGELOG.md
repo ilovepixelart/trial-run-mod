@@ -2,7 +2,7 @@
 
 All notable changes to trial-run. Versions follow [Semantic Versioning](https://semver.org): while the version is 0.y.z, anything may change between releases. The public surface is the `/court` commands, the charges, the verdict-to-decision mapping and the saved docket layout.
 
-## [Unreleased]
+## [0.3.0] - 2026-10-08
 
 ### Changed
 

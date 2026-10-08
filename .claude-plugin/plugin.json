@@ -1,7 +1,7 @@
 {
   "name": "trial-run",
   "displayName": "Trial Run",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Puts risky shell commands on trial: a prosecutor, a defense and a judge argue in a pane. A guilty verdict stops the command; an acquittal leaves it to your own permission rules.",
   "author": {
     "name": "ilovepixelart",
