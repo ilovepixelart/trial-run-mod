@@ -21,8 +21,8 @@ Claude's own words are among this evidence, so the defendant can try to sway the
 
 In Claude Code's plugin store on this machine (`$.store`), one record per case: the case number, the charged command cut to 80 characters, the charge, the verdict, the time, and for an appeal the case it retried. The exhibits are not kept. At most the newest 200 cases are kept, plus the docket's layout version.
 
-Nothing else is written. Sounds (the gavel and the spoken verdict) play locally.
+Nothing else is written, apart from a one-time note in the conversation when the `charges` setting names a charge the court does not know. Sounds (the gavel and the spoken verdict) play locally.
 
 ## How to delete it
 
-The docket is one file: `~/.claude/plugins/store/trial-run_<marketplace>-<hash>.json`, `trial-run_ilovepixelart-<hash>.json` when installed from the ilovepixelart marketplace, or `trial-run_trial-run-mod-<hash>.json` when installed from this repository's. Delete that file to erase every case. The next trial starts a new docket at case #0001.
+The docket is one file: `~/.claude/plugins/store/trial-run_<marketplace>-<hash>.json`, `trial-run_ilovepixelart-<hash>.json` when installed from the ilovepixelart marketplace, `trial-run_trial-run-mod-<hash>.json` when installed from this repository's, or `trial-run_inline-<hash>.json` when loaded from a local folder with `claude --plugin-dir`. Delete that file to erase every case. The next trial starts a new docket at case #0001.

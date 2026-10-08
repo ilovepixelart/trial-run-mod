@@ -41,12 +41,17 @@ Or in one line, straight from this repository, following `main`:
 /plugin install trial-run --marketplace ilovepixelart/trial-run-mod
 ```
 
-To stay on one release, add this repository at its tag instead:
-`/plugin marketplace add ilovepixelart/trial-run-mod#trial-run--v0.3.0`.
+To stay on one release, add this repository at its tag instead, then install
+from it:
+
+```
+/plugin marketplace add ilovepixelart/trial-run-mod#trial-run--v0.3.0
+/plugin install trial-run@trial-run-mod
+```
 
 Run `/reload-plugins` (or start a new session) after installing. To take a new
 release later, run `claude plugin update trial-run@ilovepixelart` in your
-shell. Each [release](https://github.com/ilovepixelart/trial-run-mod/releases)
+shell, or `trial-run@trial-run-mod` if you installed from this repository. Each [release](https://github.com/ilovepixelart/trial-run-mod/releases)
 also carries a zip of the plugin for `claude --plugin-url`, with its SHA-256 beside it, and
 [CHANGELOG.md](CHANGELOG.md) lists what each one changed.
 
@@ -152,9 +157,9 @@ It is theatre on top of your permission rules, and it only tightens them: a conv
 - **Cost:** three Haiku calls per trial (prosecution and defense at once, then the judge). Ordinary commands and contempt cost nothing.
 - **What it reads:** your latest message and Claude's latest message (`$.session.messages`), quoted to the court as evidence.
 - **What it runs:** the read-only git commands under [Exhibits](#exhibits) (`$.process.run`), and nothing else.
-- **What it keeps:** the docket, in the mod's own store (`$.store`), as above. Nothing else is written.
-- **Sound:** the gavel (`sounds/gavel.wav`) and the spoken verdict play through `afplay` and `say` on macOS; elsewhere the court is silent. The [`sounds` setting](#settings) silences both.
-- **Everything it calls,** as `claude plugin validate .` reports: `$.audio.play`, `$.audio.speak`, `$.clock.after`, `$.clock.sleep`, `$.command.register`, `$.fs.list`, `$.fs.stat`, `$.model.complete`, `$.process.run`, `$.session.messages`, `$.state`, `$.store`, `$.ui.open`, `$.ui.resolve`. The animations run in five surface modules (`hooks/clients/`) on the drawing's own frame clock.
+- **What it keeps:** the docket, in the mod's own store (`$.store`), as above. The only other thing it writes is a one-time note in the transcript (`$.ui.log`) when the `charges` setting names a charge it does not know.
+- **Sound:** the gavel (`sounds/gavel.wav`) plays through `afplay` on macOS, and only there; the spoken verdict uses the platform's own speech synthesizer (`say` on macOS) where one exists. The [`sounds` setting](#settings) silences both.
+- **Everything it calls,** as `claude plugin validate .` reports: `$.audio.play`, `$.audio.speak`, `$.clock.after`, `$.clock.sleep`, `$.command.register`, `$.fs.list`, `$.fs.stat`, `$.model.complete`, `$.process.run`, `$.session.messages`, `$.state`, `$.store`, `$.ui.log`, `$.ui.open`, `$.ui.resolve`. The animations run in five surface modules (`hooks/clients/`) on the drawing's own frame clock.
 
 No network access, no process but those git commands, and of the file system only `$.fs.stat` of each delete target and the working directory (where they land) and of the tracked files under a target (size, time and kind, never their content), and `$.fs.list` of each directory a delete target passes through (the names in it, to match the target's spelling). [PRIVACY.md](PRIVACY.md) lists exactly what is sent to the model and what is kept, and how to delete it.
 
