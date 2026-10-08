@@ -34,13 +34,25 @@ To stay on one release, add the marketplace at its tag instead: `/plugin marketp
 
 To try it from a clone without installing: `claude --plugin-dir /path/to/trial-run-mod`.
 
+### Settings
+
+Three settings, declared as `userConfig` in [`.claude-plugin/plugin.json`](.claude-plugin/plugin.json):
+
+| Setting | Values | Default | What it changes |
+| --- | --- | --- | --- |
+| `strictness` | `lenient`, `fair`, `hanging` | `fair` | The judge's doctrine sentence, and nothing else: a conviction still denies, and an acquittal still only hands the decision to your permission rules |
+| `sounds` | on or off | on | The gavel and the spoken verdict |
+| `charges` | charge ids: `recursive-delete`, `force-push`, `hard-reset`, `git-clean`, `drop-table`, `kubectl-delete`, `terraform-destroy`, `unread-script` | all of them | Which charges go to trial. A charge switched off is never tried: a command line charged with nothing that is switched on is left to your permission rules, and a line holding several charged commands is tried on the first one switched on. Switching `unread-script` off also lets through a line too long or too complex for the court to read |
+
+`strictness` and `sounds` are rows in `/config` (type `trial` to find them). `/config` saves them in your user settings under `pluginConfigs`, in the plugin's entry; `charges`, a list, is not a `/config` row, so set it in that same entry, as `"options": { "charges": ["force-push", "hard-reset"] }`. A change reloads the court with the new settings.
+
 ### Versioning
 
 Versions follow [Semantic Versioning](https://semver.org); while trial-run is 0.y.z, any release may change behaviour. Each release is tagged `trial-run--v<version>` and described in [CHANGELOG.md](CHANGELOG.md). The saved docket carries a layout number, and a version that finds a newer layout leaves it untouched.
 
 ## What goes to trial
 
-Only Bash calls whose command matches a charge in [`hooks/risky.ts`](hooks/risky.ts) (`RULES`, one table, and `UNREAD` beside it): recursive deletes, force pushes, hard resets, a forced `git clean`, SQL `DROP`/`TRUNCATE` through a SQL client, `kubectl delete` and `terraform destroy`, and an unread script: one a shell or SQL client reads that the line does not spell (`curl ... | sh`, `bash < x.sh`, `psql -f drop.sql`). A script the line does spell (`bash <<< '...'`, `echo '...' | sh`, a here-document) is read and charged as what it runs. Wrappers (`sudo`, `env`, `xargs`), nested shells (`bash -c`, `eval`) and global flags before the subcommand (`terraform -chdir=infra destroy`, `kubectl -n prod delete`) are looked through. In a compound command (`ls src && rm -rf src`) the case is named after the part that is charged, spelled as written (quotes and `sudo` included), and the court still sees the whole command. Every charged command goes to trial each time it runs, however often the court acquitted it before; only a retry of a command convicted earlier in the conversation is denied without one ([contempt](#contempt-of-court)). Every other command passes untouched, with no model call, and is left to your permission rules.
+Only Bash calls whose command matches a charge in [`hooks/risky.ts`](hooks/risky.ts) (`RULES`, one table, and `UNREAD` beside it): recursive deletes, force pushes, hard resets, a forced `git clean`, SQL `DROP`/`TRUNCATE` through a SQL client, `kubectl delete` and `terraform destroy`, and an unread script: one a shell or SQL client reads that the line does not spell (`curl ... | sh`, `bash < x.sh`, `psql -f drop.sql`). A script the line does spell (`bash <<< '...'`, `echo '...' | sh`, a here-document) is read and charged as what it runs. Wrappers (`sudo`, `env`, `xargs`), nested shells (`bash -c`, `eval`) and global flags before the subcommand (`terraform -chdir=infra destroy`, `kubectl -n prod delete`) are looked through. In a compound command (`ls src && rm -rf src`) the case is named after the part that is charged, spelled as written (quotes and `sudo` included), and the court still sees the whole command. Every charged command goes to trial each time it runs, however often the court acquitted it before; only a retry of a command convicted earlier in the conversation is denied without one ([contempt](#contempt-of-court)). Every other command passes untouched, with no model call, and is left to your permission rules. The [`charges` setting](#settings) switches charges off.
 
 `git rm -r` is not charged: what it removes is tracked, so git history has it back. `git clean -f` is: the untracked files it deletes are in no history at all.
 
@@ -123,7 +135,7 @@ It is theatre on top of your permission rules, and it only tightens them: a conv
 - **What it reads:** your latest message and Claude's latest message (`$.session.messages`), quoted to the court as evidence.
 - **What it runs:** the read-only git commands under [Exhibits](#exhibits) (`$.process.run`), and nothing else.
 - **What it keeps:** the docket, in the mod's own store (`$.store`), as above. Nothing else is written.
-- **Sound:** the gavel (`sounds/gavel.wav`) and the spoken verdict play through `afplay` and `say` on macOS; elsewhere the court is silent.
+- **Sound:** the gavel (`sounds/gavel.wav`) and the spoken verdict play through `afplay` and `say` on macOS; elsewhere the court is silent. The [`sounds` setting](#settings) silences both.
 - **Everything it calls,** as `claude plugin validate .` reports: `$.audio.play`, `$.audio.speak`, `$.clock.after`, `$.clock.sleep`, `$.command.register`, `$.fs.list`, `$.fs.stat`, `$.model.complete`, `$.process.run`, `$.session.messages`, `$.state`, `$.store`, `$.ui.open`, `$.ui.resolve`. The animations run in two surface modules (`hooks/clients/`) on the drawing's own frame clock.
 
 No network access, no process but those git commands, and of the file system only `$.fs.stat` of each delete target and the working directory (where they land) and of the tracked files under a target (size, time and kind, never their content), and `$.fs.list` of each directory a delete target passes through (the names in it, to match the target's spelling). [PRIVACY.md](PRIVACY.md) lists exactly what is sent to the model and what is kept, and how to delete it.

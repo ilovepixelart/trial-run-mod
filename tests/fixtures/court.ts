@@ -61,6 +61,10 @@ export type Record = {
   systems: Partial<{ [role in Role]: string }>
   opened: string[]
   runs: { argv: readonly string[]; init?: ProcessRunInit }[]
+  /**
+   * Every sound the court made: `play` for a clip, `speak <text>`.
+   */
+  sounds: string[]
 }
 
 const ZERO = {
@@ -102,7 +106,7 @@ const roleOf = (system: string): Role =>
  * @returns what it saw
  */
 export const seatCourt = (on: On, bench: Bench): Record => {
-  const record: Record = { calls: [], prompts: {}, systems: {}, opened: [], runs: [] }
+  const record: Record = { calls: [], prompts: {}, systems: {}, opened: [], runs: [], sounds: [] }
   on('model.complete', async ($, e) => {
     const role = roleOf(e.system ?? '')
     record.calls.push(role)
@@ -139,8 +143,14 @@ export const seatCourt = (on: On, bench: Bench): Record => {
       ? { deny: 'refused' }
       : { value: names.map(name => ({ name, kind: 'dir' as const, size: 0, mtimeMs: 0, isLink: false })) }
   })
-  on('audio.play', () => ({ value: undefined }))
-  on('audio.speak', () => ({ value: { via: 'system' } }))
+  on('audio.play', () => {
+    record.sounds.push('play')
+    return { value: undefined }
+  })
+  on('audio.speak', ($, e) => {
+    record.sounds.push(`speak ${e.text}`)
+    return { value: { via: 'system' } }
+  })
   return record
 }
 

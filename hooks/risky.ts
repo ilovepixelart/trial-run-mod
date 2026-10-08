@@ -1107,6 +1107,26 @@ type Trial = { charge: Charge; words: readonly string[]; matched: readonly strin
 let last: { command: string; trial: Trial } | undefined
 
 /**
+ * The ids of the charges the person switched on; undefined, every charge.
+ * Set by `switchCharges` when the plugin loads, so the one reading of a line
+ * serves its charge, its contempt key and its exhibits alike.
+ */
+let switchedOn: ReadonlySet<string> | undefined
+
+const isOn = (id: string) => switchedOn === undefined || switchedOn.has(id)
+
+/**
+ * Sets which charges go to trial; a charge switched off is never tried, and
+ * a line is charged with the first charge on it that is switched on.
+ *
+ * @param charges the ids of the charges switched on; undefined, every one
+ */
+export const switchCharges = (charges: ReadonlySet<string> | undefined) => {
+  switchedOn = charges
+  last = undefined
+}
+
+/**
  * How many command lines have been read since the module loaded, and the
  * steps the last reading took: one past `BUDGET` for a reading that ran
  * out, none for a line too long to read.
@@ -1117,6 +1137,9 @@ export const readings = { count: 0, steps: 0 }
  * A line charged as unread, not read: too long, or past the budget.
  */
 const unreadLineOf = (command: string): Trial => {
+  if (!isOn(UNREAD.id)) {
+    return undefined
+  }
   const words = command.trim().split(/\s+/)
   return { charge: { ...UNREAD, command }, words, matched: words, known: words }
 }
@@ -1140,11 +1163,14 @@ const readTrialOf = (command: string): Trial => {
   }
   for (const { words, open, text, whole, known, unread } of commands) {
     if (unread === true) {
-      return { charge: { ...UNREAD, command: text }, words, matched: words, known: words }
+      if (isOn(UNREAD.id)) {
+        return { charge: { ...UNREAD, command: text }, words, matched: words, known: words }
+      }
+      continue
     }
     const tried = open ? PROGRAMS.map(program => [program, ...words.slice(1)]) : [words]
     for (const one of tried) {
-      const rule = RULES.find(candidate => candidate.test(one))
+      const rule = RULES.find(candidate => isOn(candidate.id) && candidate.test(one))
       if (rule) {
         const own = whole ?? one
         return { charge: { id: rule.id, label: rule.label, command: text }, words: own, matched: one, known: known === 'matched' ? one : (known ?? own) }

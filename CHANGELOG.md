@@ -17,6 +17,7 @@ All notable changes to trial-run. Versions follow [Semantic Versioning](https://
 - Object (`o`) and Skip (`s`) during the deliberation; a skipped trial is filed as waived.
 - Every charged command goes to trial each time it runs; only contempt denies one without a trial. An acquittal hands the decision to your permission rules, and a command no charge recognises is not tried and falls through to them: the court is a best-effort layer, not a security boundary.
 - The saved docket records its layout (2). Stored records are read as untrusted: unknown fields are dropped. A layout 1 docket is read as it is; a docket saved by a newer version is never read or overwritten.
+- Settings (`userConfig`): `strictness` (`lenient`, `fair` or `hanging`, default `fair`) changes the judge's doctrine sentence and never the decision a ruling maps to; `sounds` (default on) silences the gavel and the spoken verdict; `charges` (default every charge) lists the charges that go to trial, and a charge switched off is never tried.
 - Requires Claude Code 2.1.287 or later.
 
 ### Known limitations

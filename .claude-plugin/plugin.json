@@ -20,5 +20,27 @@
     "function-hooks",
     "claude-code-mod"
   ],
-  "types": "./types/index.d.ts"
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "strictness": {
+      "type": "string",
+      "title": "Strictness",
+      "description": "How readily the judge convicts: lenient, fair or hanging. It changes the judge's doctrine only: a conviction still denies and an acquittal still hands the decision to your permission rules.",
+      "options": ["lenient", "fair", "hanging"],
+      "default": "fair"
+    },
+    "sounds": {
+      "type": "boolean",
+      "title": "Sounds",
+      "description": "Bang the gavel and read the verdict out loud.",
+      "default": true
+    },
+    "charges": {
+      "type": "string",
+      "multiple": true,
+      "title": "Charges",
+      "description": "The charges that go to trial, by id: recursive-delete, force-push, hard-reset, git-clean, drop-table, kubectl-delete, terraform-destroy, unread-script. A command charged with none of them is left to your permission rules.",
+      "default": ["recursive-delete", "force-push", "hard-reset", "git-clean", "drop-table", "kubectl-delete", "terraform-destroy", "unread-script"]
+    }
+  }
 }

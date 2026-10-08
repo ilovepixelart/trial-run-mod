@@ -10,8 +10,10 @@ import type { CaseRecord } from './docket'
 import { gaugeOf } from './gauge'
 import { caseNumberOf, caseRowOf, docketLayoutOf, headerLinesOf, lineOf, rapSheetLayoutOf, wrapOf } from './layout'
 import { DELIBERATION_MS, LANDING_MS, RISE_MS, paceOf } from './pace'
-import { chargeOf } from './risky'
+import { chargeOf, switchCharges } from './risky'
 import { sentenceFor } from './sentence'
+import { settingsOf } from './settings'
+import type { Strictness } from './settings'
 import { GAVEL, SCALES, segmentsOf, stampFor } from './stamp'
 import { speechRequestOf, spokenOf, testimonyOf, tightOf, tryCase } from './trial'
 import type { Case, Speak } from './trial'
@@ -211,9 +213,9 @@ const factsFrom = async ($: EngineInterface, command: string): Promise<Facts> =>
  * reply is refused or empty.
  */
 const speakerOf =
-  ($: EngineInterface): Speak =>
+  ($: EngineInterface, strictness: Strictness): Speak =>
   async (role, prompt, maxTokens) => {
-    const reply = await $.model.complete(speechRequestOf(role, prompt, maxTokens))
+    const reply = await $.model.complete(speechRequestOf(role, prompt, maxTokens, strictness))
     const text = reply.isAnswered ? reply.text.trim() : ''
     return text === '' ? undefined : text
   }
@@ -233,7 +235,7 @@ type Memory = {
  * files it marked as an appeal of that case, and lifts contempt for the
  * command when the appeal is upheld.
  */
-const appealWith = async ($: EngineInterface, memory: Memory, context: string): Promise<string> => {
+const appealWith = async ($: EngineInterface, memory: Memory, context: string, strictness: Strictness): Promise<string> => {
   const appealed = memory.appealable
   if (appealed === undefined) {
     return 'There is no conviction to appeal.'
@@ -245,7 +247,7 @@ const appealWith = async ($: EngineInterface, memory: Memory, context: string): 
   const heard = async (): Promise<Ruling> => {
     const [testimony, facts] = await Promise.all([testimonyFrom($), factsFrom($, appealed.command)])
     const one: Case = { ...testimony, command: appealed.command, charge: appealed.charge, plea: context, exhibits: exhibitLinesOf(facts) }
-    return tryCase(one, speakerOf($), () => undefined)
+    return tryCase(one, speakerOf($, strictness), () => undefined)
   }
   const ruling = await Promise.race<Ruling>([
     heard().catch(() => ({ kind: 'hung', reason: 'the court fell into disorder' })),
@@ -385,7 +387,9 @@ const runsOf = (strip: readonly CourtVerdict['kind'][]) =>
     return runs
   }, [])
 
-export const register: Register = on => {
+export const register: Register = (on, options) => {
+  const settings = settingsOf(options)
+  switchCharges(settings.charges)
   let lastId = 0
   const objections = new Map<number, (ruling: Ruling) => void>()
   const memory: Memory = { convicted: new Map<string, number>(), appealable: undefined }
@@ -422,7 +426,7 @@ export const register: Register = on => {
       if (e.origin.kind !== 'composer') {
         return { text: 'Only the person can file an appeal.' }
       }
-      return { text: await appealWith($, memory, rest.join(' ')) }
+      return { text: await appealWith($, memory, rest.join(' '), settings.strictness) }
     }
     if (e.args.trim() === 'docket') {
       await $.ui.open({ id: DOCKET_PANE, title: 'trial-run · docket', columns: DOCK_COLUMNS, rows: INLINE_ROWS })
@@ -470,7 +474,9 @@ export const register: Register = on => {
           update($, trialAtom, trial => (trial?.id === contemptId ? { ...trial, isPlaced: opened.isPlaced } : trial)),
         ),
       )
-      quietly($.audio.play({ asset: GAVEL_SOUND }))
+      if (settings.sounds) {
+        quietly($.audio.play({ asset: GAVEL_SOUND }))
+      }
       await fileOnDocket($, { command: charge.command, charge: charge.label, verdict: 'contempt', at: Date.now() })
       return contemptOf(convictedIn, charge.label)
     }
@@ -499,7 +505,9 @@ export const register: Register = on => {
         update($, trialAtom, trial => (trial?.id === id ? { ...trial, isPlaced: opened.isPlaced } : trial)),
       ),
     )
-    quietly($.audio.play({ asset: GAVEL_SOUND }))
+    if (settings.sounds) {
+      quietly($.audio.play({ asset: GAVEL_SOUND }))
+    }
 
     const reveal = (shown: number) =>
       quietly(
@@ -543,7 +551,7 @@ export const register: Register = on => {
           }
         }),
       )
-    const speak = speakerOf($)
+    const speak = speakerOf($, settings.strictness)
     const timer = new AbortController()
     const never = new Promise<Ruling>(() => undefined)
 
@@ -599,8 +607,10 @@ export const register: Register = on => {
       })
     })
     await fileOnDocket($, { command: charge.command, charge: charge.label, verdict: ruling.kind, at: Date.now() })
-    quietly($.audio.play({ asset: GAVEL_SOUND }))
-    quietly($.audio.speak(SPOKEN[ruling.kind]))
+    if (settings.sounds) {
+      quietly($.audio.play({ asset: GAVEL_SOUND }))
+      quietly($.audio.speak(SPOKEN[ruling.kind]))
+    }
     return sentence
   }).catch(($, e, next) => failedCheckOf(() => next(e)))
 
