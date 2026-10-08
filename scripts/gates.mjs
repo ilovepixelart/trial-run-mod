@@ -25,6 +25,7 @@ const gates = [
   ['test', 'claude', ['plugin', 'test', '.']],
   ['hostile git repositories', 'node', ['--test', 'tests/hostile/git.hostile.mjs']],
   ['typecheck', 'npx', ['-y', '-p', 'typescript', 'tsc', '-p', '.']],
+  ['guide symbols', 'node', ['scripts/check-guide.mjs']],
 ]
 
 const run = (name, command, argv) => {
