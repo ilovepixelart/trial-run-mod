@@ -1,8 +1,11 @@
 // Checks that every symbol docs/how-it-works.md names in backticks exists in
 // the code: an identifier, a `$` call, an event name or a call signature must
 // appear as a whole word in hooks/, tests/, types/index.d.ts or the engine's type
-// declarations, and a repository path must exist. A span holding a space or
-// any other character is prose (a command, a quoted line) and is not checked.
+// declarations; a span shaped like a path (a slash between names, a dotfile
+// included) must exist in the repository, or be a module the code imports
+// from. A span holding a space or any other character, or a path with a part
+// that is only dots (`lnk/..`, `refs/remotes/...`), is prose (a command, a
+// quoted line, an example) and is not checked.
 //
 //   node scripts/check-guide.mjs [guide]    default docs/how-it-works.md
 //
@@ -33,11 +36,13 @@ const CALL = /^([\w$.]+)\(.*\)$/
 /** What a backticked span claims exists, or undefined for prose. */
 const claimOf = span => {
   const call = CALL.exec(span)
-  const name = (call === null ? span : call[1]).replace(/^\./, '')
-  if (/^[\w.-]+(\/[\w.-]*)+$/.test(name) && existsSync(name.split('/')[0])) {
-    return { kind: 'path', name }
+  const name = call === null ? span : call[1]
+  if (/^[\w.-]+(\/[\w.-]*)+$/.test(name)) {
+    return /(^|\/)\.+(\/|$)/.test(name) ? undefined : { kind: 'path', name }
   }
-  return IDENTIFIER.test(name) ? { kind: 'symbol', name } : undefined
+  // a method is named with its dot (`.catch`)
+  const symbol = name.replace(/^\./, '')
+  return IDENTIFIER.test(symbol) ? { kind: 'symbol', name: symbol } : undefined
 }
 
 const escape = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -50,7 +55,7 @@ for (const span of spans) {
   if (claim === undefined) {
     continue
   }
-  const isFound = claim.kind === 'path' ? existsSync(claim.name) : isInCode(claim.name)
+  const isFound = claim.kind === 'path' ? existsSync(claim.name) || corpus.includes(`from '${claim.name}'`) : isInCode(claim.name)
   if (!isFound) {
     missing.add(`${guide} names \`${span}\`, which is not ${claim.kind === 'path' ? 'in the repository' : 'in hooks/, tests/ or the types'}`)
   }
