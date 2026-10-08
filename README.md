@@ -4,7 +4,7 @@
 
 Your AI tried to force-push to main. It got a trial. It lost.
 
-![A force push goes on trial in Claude Code and is found guilty](assets/demo.gif)
+![A force push goes on trial: the exhibit shows two upstream commits by two authors, the court finds it guilty with a sentence, the retry is contempt, and the turn ends with the court adjourned](assets/demo.gif)
 
 A Claude Code mod that puts risky shell commands on trial before they run.
 
