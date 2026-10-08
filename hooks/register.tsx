@@ -517,6 +517,9 @@ export const register: Register = (on, options) => {
   })
 
   on('tool.check', { tool: 'Bash' }, async ($, e, next) => {
+    // the case counts in the turn it began in, so a turn aborted while it is
+    // heard takes it along, untold
+    const turnTally = tally
     const command = commandOf(e.input)
     const charge = command === undefined ? undefined : chargeOf(command)
     const contemptKey = command === undefined ? undefined : contemptKeyOfLine(command)
@@ -544,7 +547,7 @@ export const register: Register = (on, options) => {
       }))
       await update($, bandAtom, () => true)
       await stampRow($, e.tool_use_id, { kind: 'contempt', number: nextCaseNumber(history) })
-      tally.contempt += 1
+      turnTally.contempt += 1
       const contemptId = lastId
       quietly(
         $.ui.open({ id: PANE, title: 'trial-run · court', columns: DOCK_COLUMNS, rows: INLINE_ROWS }).then(opened =>
@@ -656,7 +659,7 @@ export const register: Register = (on, options) => {
     // the decision exists
     const penalty = ruling.kind === 'guilty' ? sentenceFor(charge.id, charge.command) : undefined
     const sentence = sentenceOf(ruling, await beneath, charge.label, penalty)
-    tally[ruling.kind] += 1
+    turnTally[ruling.kind] += 1
     if (ruling.kind === 'guilty') {
       convicted.set(contemptKey, opening.number)
       memory.appealable = { command, charge, key: contemptKey, number: opening.number }

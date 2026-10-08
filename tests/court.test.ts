@@ -1513,6 +1513,57 @@ describe('adjournment', () => {
     expect(await $.turn.complete(turnEnd())).toEqual({ text: 'Done.' })
   })
 
+  test('a trial still in session when its turn is aborted is told in no turn', async ($, on) => {
+    const clock = mock.clock(on)
+    seatCourt(on, {
+      reply: async role => {
+        await clock.sleep(1_000)
+        return said(role === 'judge' ? GUILTY : 'words.')
+      },
+      beneath: { decision: 'ask', reason: 'mode' },
+    })
+    on('turn.complete', ($, e) => ({ text: e.answer }))
+
+    const pending = $.tool.check(check('rm -rf ~'))
+    await clock.settle()
+    expect(await $.turn.complete(turnEnd({ isAborted: true, reason: 'aborted' }))).toEqual({ text: 'Done.' })
+    await clock.advance(5_000)
+    expect((await pending).decision).toBe('deny')
+
+    expect(await $.turn.complete(turnEnd({ turnId: 'turn-2' }))).toEqual({ text: 'Done.' })
+  })
+
+  test('contempt still being recorded when its turn is aborted is told in no turn', async ($, on) => {
+    const clock = mock.clock(on)
+    // a store that answers its reads late once the conviction is told
+    const saved = new Map<string, unknown>()
+    let isSlow = false
+    on('store.get', async ($, e) => {
+      if (isSlow) {
+        await clock.sleep(1_000)
+      }
+      return { value: saved.get(e.key) }
+    })
+    on('store.set', ($, e) => {
+      saved.set(e.key, e.value)
+      return { value: undefined }
+    })
+    seatCourt(on, rulingsBench(GUILTY))
+    on('turn.complete', ($, e) => ({ text: e.answer }))
+
+    expect((await $.tool.check(check('rm -rf ~'))).decision).toBe('deny')
+    expect((await $.turn.complete(turnEnd())).text).toBe('Court adjourned. 1 conviction, 0 acquittals this turn.')
+
+    isSlow = true
+    const pending = $.tool.check(check('rm -rf ~'))
+    await clock.settle()
+    expect(await $.turn.complete(turnEnd({ isAborted: true, reason: 'aborted', turnId: 'turn-2' }))).toEqual({ text: 'Done.' })
+    await clock.advance(5_000)
+    expect((await pending).reason).toContain('Contempt')
+
+    expect(await $.turn.complete(turnEnd({ turnId: 'turn-3' }))).toEqual({ text: 'Done.' })
+  })
+
   test('a line another hook beneath added stays, with the adjournment under it', async ($, on) => {
     seatCourt(on, rulingsBench(GUILTY))
     on('turn.complete', () => ({ text: 'TL;DR: nothing ran.' }))
