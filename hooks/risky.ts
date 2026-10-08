@@ -62,8 +62,13 @@ const uncommentedOf = (sql: string): string => {
  * The charges, in the order the court tries them; the first that fits is
  * read out. Matching is by spelling and best effort: a command assembled at
  * run time is not seen, such as a flag from a variable (`rm $F src`),
- * `eval "$CMD"`, `source <(curl ...)`, an alias, or a script file a shell is
- * given by name (`bash x.sh`).
+ * `eval "$CMD"`, `source <(curl ...)`, an alias, a git alias whose body is
+ * in the environment (`git --config-env=alias.x=VAR x`), or a script file a
+ * shell is given by name (`bash x.sh`). Nor is a command in a process
+ * substitution (`cat <(rm -rf x)`) or a long option abbreviated
+ * (`rm --rec`). A `-c` alias named for a git built-in no charge names is
+ * read as the alias though git runs the built-in, which can only charge
+ * more.
  */
 export const RULES: readonly Rule[] = [
   {
@@ -876,6 +881,14 @@ const runnerScriptOf = (words: readonly string[]): string | undefined => {
 const GIT_VALUES = new Set(['-c', '-C', '--git-dir', '--work-tree', '--namespace', '--config-env', '--super-prefix'])
 
 /**
+ * The git subcommands a charge names. git runs a built-in command over an
+ * alias of the same name (`git -c alias.push=status push --force` pushes),
+ * so an alias named for one of these is not read; an alias named for
+ * another built-in is still read, which can only charge more.
+ */
+const GIT_CHARGED = new Set(['push', 'reset', 'clean'])
+
+/**
  * What a git alias set on the command line (`git -c alias.x=...`) runs when
  * the subcommand names it: a `!` alias is a shell script given the words
  * after it, any other is git with its words in place of the subcommand.
@@ -888,7 +901,7 @@ const gitAliasScriptOf = (words: readonly string[]): string | undefined => {
     if (alias !== null) aliases.set((alias[1] ?? '').toLowerCase(), alias[2] ?? '')
     at += GIT_VALUES.has(words[at] ?? '') ? 2 : 1
   }
-  const body = aliases.get((words[at] ?? '').toLowerCase())
+  const body = GIT_CHARGED.has(words[at] ?? '') ? undefined : aliases.get((words[at] ?? '').toLowerCase())
   const args = words.slice(at + 1)
   if (body === undefined) {
     return undefined

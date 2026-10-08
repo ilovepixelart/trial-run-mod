@@ -380,6 +380,17 @@ describe('risky', () => {
     }
   })
 
+  test('a git alias named for a built-in command is not run: git runs its own', () => {
+    const cases: readonly (readonly [string, string])[] = [
+      ['git -c alias.push=status push --force', 'force-push'],
+      ['git -c alias.reset=log reset --hard', 'hard-reset'],
+      ['git -c alias.clean=status clean -fd', 'git-clean'],
+    ]
+    for (const [command, id] of cases) {
+      expect(chargeOf(command)?.id, command).toBe(id)
+    }
+  })
+
   test('a git alias that runs something harmless is not charged', () => {
     for (const command of ['git -c alias.st=status st', "git -c alias.x='!ls -R' x", "git -c alias.y='reset --hard' status", 'git -c core.x=y status']) {
       expect(chargeOf(command), command).toBeUndefined()
