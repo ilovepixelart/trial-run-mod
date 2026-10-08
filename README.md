@@ -154,7 +154,7 @@ It is theatre on top of your permission rules, and it only tightens them: a conv
 - **What it runs:** the read-only git commands under [Exhibits](#exhibits) (`$.process.run`), and nothing else.
 - **What it keeps:** the docket, in the mod's own store (`$.store`), as above. Nothing else is written.
 - **Sound:** the gavel (`sounds/gavel.wav`) and the spoken verdict play through `afplay` and `say` on macOS; elsewhere the court is silent. The [`sounds` setting](#settings) silences both.
-- **Everything it calls,** as `claude plugin validate .` reports: `$.audio.play`, `$.audio.speak`, `$.clock.after`, `$.clock.sleep`, `$.command.register`, `$.fs.list`, `$.fs.stat`, `$.model.complete`, `$.process.run`, `$.session.messages`, `$.state`, `$.store`, `$.ui.open`, `$.ui.resolve`. The animations run in two surface modules (`hooks/clients/`) on the drawing's own frame clock.
+- **Everything it calls,** as `claude plugin validate .` reports: `$.audio.play`, `$.audio.speak`, `$.clock.after`, `$.clock.sleep`, `$.command.register`, `$.fs.list`, `$.fs.stat`, `$.model.complete`, `$.process.run`, `$.session.messages`, `$.state`, `$.store`, `$.ui.open`, `$.ui.resolve`. The animations run in five surface modules (`hooks/clients/`) on the drawing's own frame clock.
 
 No network access, no process but those git commands, and of the file system only `$.fs.stat` of each delete target and the working directory (where they land) and of the tracked files under a target (size, time and kind, never their content), and `$.fs.list` of each directory a delete target passes through (the names in it, to match the target's spelling). [PRIVACY.md](PRIVACY.md) lists exactly what is sent to the model and what is kept, and how to delete it.
 
