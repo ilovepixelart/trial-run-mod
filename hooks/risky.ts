@@ -104,7 +104,8 @@ export const RULES: readonly Rule[] = [
     label: 'dropped or truncated data',
     test: words =>
       SQL_CLIENTS.has(words[0] ?? '') &&
-      /\b(drop\s+(table|database|schema)|truncate)\b/i.test(uncommentedOf(words.join(' '))),
+      // read with its comments and without: MySQL runs a /*! or /*+ body
+      [words.join(' '), uncommentedOf(words.join(' '))].some(sql => /\b(drop\s+(table|database|schema)|truncate)\b/i.test(sql)),
   },
   {
     id: 'kubectl-delete',

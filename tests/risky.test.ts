@@ -52,6 +52,17 @@ describe('risky', () => {
     }
   })
 
+  test('a drop inside a SQL comment is charged: MySQL runs /*! and /*+ comments', () => {
+    for (const command of [
+      "mysql -e '/*!50000 DROP TABLE users */'",
+      "mysql -e '/*!DROP TABLE x*/'",
+      "mysql -e '/*+ TRUNCATE x */'",
+      "psql -c 'SELECT 1 /* DROP TABLE x */'",
+    ]) {
+      expect(chargeOf(command)?.id, command).toBe('drop-table')
+    }
+  })
+
   test('a drop with many SQL comments after it is read in time linear in its length', () => {
     const command = `psql -c "drop ${'/**/ '.repeat(25)}x"`
     const started = Date.now()
