@@ -40,6 +40,25 @@ const isGit = (words: readonly string[], sub: string) =>
   words[0] === 'git' && words.includes(sub)
 
 /**
+ * SQL with each closed block comment read as the space it stands for,
+ * found by a scan: a regex over the comments backtracks exponentially on a
+ * run of them.
+ */
+const uncommentedOf = (sql: string): string => {
+  let text = ''
+  let at = 0
+  for (;;) {
+    const open = sql.indexOf('/*', at)
+    const close = open === -1 ? -1 : sql.indexOf('*/', open + 2)
+    if (close === -1) {
+      return text + sql.slice(at)
+    }
+    text += `${sql.slice(at, open)} `
+    at = close + 2
+  }
+}
+
+/**
  * The charges, in the order the court tries them; the first that fits is
  * read out. Matching is by spelling and best effort: a command assembled at
  * run time is not seen, such as a flag from a variable (`rm $F src`),
@@ -85,8 +104,7 @@ export const RULES: readonly Rule[] = [
     label: 'dropped or truncated data',
     test: words =>
       SQL_CLIENTS.has(words[0] ?? '') &&
-      // a /* comment */ separates words as a space does
-      /\b(drop(\s|\/\*[\s\S]*?\*\/)+(table|database|schema)|truncate)\b/i.test(words.join(' ')),
+      /\b(drop\s+(table|database|schema)|truncate)\b/i.test(uncommentedOf(words.join(' '))),
   },
   {
     id: 'kubectl-delete',

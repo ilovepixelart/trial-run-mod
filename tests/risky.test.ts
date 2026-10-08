@@ -52,6 +52,13 @@ describe('risky', () => {
     }
   })
 
+  test('a drop with many SQL comments after it is read in time linear in its length', () => {
+    const command = `psql -c "drop ${'/**/ '.repeat(25)}x"`
+    const started = Date.now()
+    expect(chargeOf(command)).toBeUndefined()
+    expect(Date.now() - started).toBeLessThan(100)
+  })
+
   test('global flags before the subcommand do not hide a teardown', () => {
     const cases: readonly (readonly [string, string])[] = [
       ['terraform -chdir=infra destroy -auto-approve', 'terraform-destroy'],
