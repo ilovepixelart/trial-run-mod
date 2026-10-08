@@ -1,4 +1,4 @@
 {
-  "description": "Courtroom for risky Bash commands: tool.check trials, the court pane and band, the gavel",
+  "description": "Courtroom for risky Bash commands: tool.check trials, the court pane and band, the Bash description notice, transcript stamps, the spinner, the adjournment line, the gavel",
   "modules": ["./register.tsx"]
 }
