@@ -26,7 +26,7 @@ The court is strict but not unreasonable: `rm -rf node_modules` for a clean rein
 
 ## Install
 
-Requires Claude Code 2.1.287 or later (mods). Developed and tested on 2.1.292. The court is designed for a dark Claude Code theme; on a light theme some text in the pane is hard to read.
+Requires Claude Code 2.1.287 or later (mods). Developed and tested on 2.1.294. The court is designed for a dark Claude Code theme; on a light theme some text in the pane is hard to read.
 
 From the ilovepixelart marketplace, which pins each mod to its latest release:
 
