@@ -166,7 +166,8 @@ No network access, no process but those git commands, and of the file system onl
 ## Development
 
 ```sh
-node scripts/gates.mjs           # every gate CI runs, in its order
+node scripts/gates.mjs              # every gate CI runs, in its order
+node scripts/gates.mjs --typecheck  # also the gates that need the engine's types (open the plugin interactively once): typecheck, guide checks
 node scripts/gates.mjs --load    # also the tests 8 times at once, as a slower runner would
 ```
 

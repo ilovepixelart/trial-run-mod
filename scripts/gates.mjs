@@ -3,6 +3,9 @@
 // the same check CI makes.
 //
 //   node scripts/gates.mjs                 the gates
+//   node scripts/gates.mjs --typecheck     also the gates that need the engine's type declarations (the
+//                                          typecheck and the guide's checks), locally: Claude Code writes them
+//                                          when the plugin loads in an interactive session, so CI skips them
 //   node scripts/gates.mjs --tag <tag>     the release check also checks the tag
 //   node scripts/gates.mjs --load [n]      also run the tests n times at once (default 8),
 //                                          as a slower runner would, to catch timing flakes
@@ -16,6 +19,7 @@ const tagIndex = args.indexOf('--tag')
 const tag = tagIndex === -1 ? undefined : args[tagIndex + 1]
 const loadIndex = args.indexOf('--load')
 const load = loadIndex === -1 ? 0 : Number(args[loadIndex + 1] ?? 8) || 8
+const wantsTypes = args.includes('--typecheck')
 
 const TYPES = '.claude-plugin/types/claude-code/index.d.ts'
 
@@ -24,9 +28,9 @@ const gates = [
   ['validate', 'claude', ['plugin', 'validate', '--strict', '.']],
   ['test', 'claude', ['plugin', 'test', '.']],
   ['hostile git repositories', 'node', ['--test', 'tests/hostile/git.hostile.mjs']],
-  ['typecheck', 'npx', ['-y', '-p', 'typescript', 'tsc', '-p', '.']],
-  ['guide check', 'node', ['--test', 'scripts/check-guide.test.mjs']],
-  ['guide symbols', 'node', ['scripts/check-guide.mjs']],
+  ...(wantsTypes ? [['typecheck', 'npx', ['-y', '-p', 'typescript', 'tsc', '-p', '.']]] : []),
+  ...(wantsTypes ? [['guide check', 'node', ['--test', 'scripts/check-guide.test.mjs']]] : []),
+  ...(wantsTypes ? [['guide symbols', 'node', ['scripts/check-guide.mjs']]] : []),
 ]
 
 const run = (name, command, argv) => {
@@ -38,18 +42,14 @@ const run = (name, command, argv) => {
   }
 }
 
-const writeTypes = () => {
+const needTypes = () => {
   if (existsSync(TYPES)) {
     return
   }
-  // the plugin load writes the declarations, then stops at the login check
-  // when there are no credentials, so its exit code is not the gate
-  console.log(`\n== type declarations: claude --plugin-dir . -p ping`)
-  spawnSync('claude', ['--plugin-dir', '.', '-p', 'ping'], { stdio: 'inherit' })
-  if (!existsSync(TYPES)) {
-    console.error(`\ntype declarations failed: ${TYPES} was not written`)
-    process.exit(1)
-  }
+  // Claude Code writes the declarations when the plugin loads in an
+  // interactive session; a print-mode run (-p) writes none
+  console.error(`\ntype declarations missing: ${TYPES}; open the plugin once with claude --plugin-dir . and run again`)
+  process.exit(1)
 }
 
 const underLoad = n =>
@@ -67,7 +67,7 @@ const underLoad = n =>
 
 for (const [name, command, argv] of gates) {
   if (name === 'typecheck') {
-    writeTypes()
+    needTypes()
   }
   run(name, command, argv)
 }
