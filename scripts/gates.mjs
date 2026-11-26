@@ -4,7 +4,7 @@
 //
 //   node scripts/gates.mjs                 the gates
 //   node scripts/gates.mjs --typecheck     also the gates that need the engine's type declarations (the
-//                                          typecheck and the guide's checks), locally: Claude Code writes them
+//                                          typecheck), locally: Claude Code writes them
 //                                          when the plugin loads in an interactive session, so CI skips them
 //   node scripts/gates.mjs --tag <tag>     the release check also checks the tag
 //   node scripts/gates.mjs --load [n]      also run the tests n times at once (default 8),

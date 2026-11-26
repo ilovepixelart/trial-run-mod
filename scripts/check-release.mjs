@@ -1,7 +1,7 @@
 // Release gates for this plugin, run in CI on every push and by the release
 // workflow on a tag.
 //
-//   node scripts/check-release.mjs                 version, single source, CHANGELOG present
+//   node scripts/check-release.mjs                 version, single source, the README's pinned tag, CHANGELOG present
 //   node scripts/check-release.mjs --tag <tag>     also: tag matches, CHANGELOG has the version
 //   node scripts/check-release.mjs --notes         print the CHANGELOG section for the version
 //
@@ -31,6 +31,27 @@ if (existsSync('.claude-plugin/marketplace.json')) {
     if (entry.name === name && entry.version !== undefined) {
       fail(`marketplace.json entry "${name}" repeats the version; keep it in plugin.json only`)
     }
+  }
+}
+
+// The README's install line pins a release tag: after a version bump it must name the new one, or it installs the old.
+if (existsSync('README.md')) {
+  const pinned = [...readFileSync('README.md', 'utf8').matchAll(new RegExp(`#${name}--v([0-9A-Za-z.+-]+)`, 'g'))].map(m => m[1])
+  for (const at of pinned.filter(v => v !== version)) {
+    fail(`README.md pins ${name}--v${at}; the version is ${version}`)
+  }
+}
+
+// A README whose Stable surface has an Options row promises those options: plugin.json's userConfig must be
+// exactly those. A README without that row promises none, and is not checked.
+const optionsRow = existsSync('README.md')
+  ? readFileSync('README.md', 'utf8').split('\n').find(line => line.startsWith('| Options |'))
+  : undefined
+if (optionsRow !== undefined) {
+  const promised = [...optionsRow.split('|')[2].split(':')[0].matchAll(/`([^`]+)`/g)].map(m => m[1]).sort()
+  const options = Object.keys(plugin.userConfig ?? {}).sort()
+  if (promised.join() !== options.join()) {
+    fail(`README.md's Stable surface promises options ${JSON.stringify(promised)}; plugin.json has ${JSON.stringify(options)}`)
   }
 }
 
