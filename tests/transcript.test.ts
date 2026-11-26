@@ -23,6 +23,12 @@ const call = (command: string, id: string) => ({ tool: 'Bash', input: { command 
 const ENGINE_ROW = { type: 'Text', props: {}, children: ['  ⎿  Error: Permission to use Bash denied'] }
 const ENGINE_GROUP = { type: 'Text', props: {}, children: ['  Ran 2 shell commands'] }
 
+/**
+ * A row as drawn: the engine names the plugin that returned each part of it.
+ */
+const DRAWN_ENGINE_ROW = { ...ENGINE_ROW, part: { plugin: 'test' } }
+const DRAWN_ENGINE_GROUP = { ...ENGINE_GROUP, part: { plugin: 'test' } }
+
 const drawsEngine = (on: On) => {
   on('ui.render', { component: 'ToolResult' }, () => ENGINE_ROW as never)
   on('ui.render', { component: 'ToolUse' }, () => ENGINE_ROW as never)
@@ -64,7 +70,7 @@ describe('transcript', () => {
       const row = await $.ui.mount({ ...resultRow('toolu_17'), surface })
       const drawn = await row.drawn()
       // wrapped, never replaced: Claude Code's own row first, whole
-      expect(firstChildOf(drawn), surface).toEqual(ENGINE_ROW)
+      expect(firstChildOf(drawn), surface).toEqual(DRAWN_ENGINE_ROW)
       expect(textsOf(drawn).join('\n'), surface).toBe(`${ENGINE_ROW.children[0]}\n✕ GUILTY · case #0017`)
       await row.unmount()
     }
@@ -97,7 +103,7 @@ describe('transcript', () => {
     for (const isExpanded of [false, true]) {
       const group = await $.ui.mount({ ...groupOf(['toolu_ls', 'toolu_17'], isExpanded), surface: 'terminal' })
       const drawn = await group.drawn()
-      expect(firstChildOf(drawn)).toEqual(ENGINE_GROUP)
+      expect(firstChildOf(drawn)).toEqual(DRAWN_ENGINE_GROUP)
       expect(textsOf(drawn).join('\n')).toBe(`${ENGINE_GROUP.children[0]}\n✕ GUILTY · case #0017`)
       await group.unmount()
     }
@@ -115,11 +121,11 @@ describe('transcript', () => {
     for (const surface of SURFACES) {
       for (const site of [resultRow('toolu_ls'), resultRow('toolu_acquitted'), resultRow('toolu_never'), resultRow('toolu_read', 'Read')]) {
         const row = await $.ui.mount({ ...site, surface })
-        expect(await row.drawn(), `${surface} ${site.requestId}`).toEqual(ENGINE_ROW)
+        expect(await row.drawn(), `${surface} ${site.requestId}`).toEqual(DRAWN_ENGINE_ROW)
         await row.unmount()
       }
       const group = await $.ui.mount({ ...groupOf(['toolu_ls', 'toolu_acquitted']), surface })
-      expect(await group.drawn(), surface).toEqual(ENGINE_GROUP)
+      expect(await group.drawn(), surface).toEqual(DRAWN_ENGINE_GROUP)
       await group.unmount()
     }
   })
@@ -131,7 +137,7 @@ describe('transcript', () => {
 
     expect((await $.tool.check(call('rm -rf ~', 'toolu_hung'))).decision).toBe('ask')
     const row = await $.ui.mount({ ...resultRow('toolu_hung'), surface: 'terminal' })
-    expect(await row.drawn()).toEqual(ENGINE_ROW)
+    expect(await row.drawn()).toEqual(DRAWN_ENGINE_ROW)
   })
 
   test('a guilty ruling the rules beneath fail under asks the person and stamps no row', async ($, on) => {
@@ -146,7 +152,7 @@ describe('transcript', () => {
 
     expect((await $.tool.check(call('rm -rf ~', 'toolu_failed'))).decision).toBe('ask')
     const row = await $.ui.mount({ ...resultRow('toolu_failed'), surface: 'terminal' })
-    expect(await row.drawn()).toEqual(ENGINE_ROW)
+    expect(await row.drawn()).toEqual(DRAWN_ENGINE_ROW)
   })
 
   test('two trials at once are stamped with the numbers they are filed under', async ($, on) => {
@@ -235,11 +241,11 @@ describe('transcript', () => {
     await $.tool.check(call('rm -rf ~', 'toolu_17'))
 
     const row = await $.ui.mount({ ...resultRow('toolu_17', 'Read'), surface: 'terminal' })
-    expect(await row.drawn()).toEqual(ENGINE_ROW)
+    expect(await row.drawn()).toEqual(DRAWN_ENGINE_ROW)
     const site = groupOf(['toolu_17'])
     const calls = site.props.calls.map(one => ({ ...one, tool: 'Read' }))
     const group = await $.ui.mount({ ...site, props: { ...site.props, calls }, surface: 'terminal' })
-    expect(await group.drawn()).toEqual(ENGINE_GROUP)
+    expect(await group.drawn()).toEqual(DRAWN_ENGINE_GROUP)
   })
 
   for (const columns of [80, 120]) {

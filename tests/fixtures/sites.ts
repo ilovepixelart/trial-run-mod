@@ -23,6 +23,7 @@ export const BAND_SITE = {
   component: 'AbovePrompt',
   props: {
     hasSurvey: false,
+    isCollapsed: false,
     isWorking: true,
     maxRows: 6,
     bodyColumns: 100,
