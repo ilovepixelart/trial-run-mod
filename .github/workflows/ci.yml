@@ -3,10 +3,6 @@ name: ci
 on:
   push:
   pull_request:
-  schedule:
-    # Nightly against the newest Claude Code: the mod API is early access and
-    # can change between releases without notice.
-    - cron: '17 4 * * *'
   workflow_dispatch:
 
 jobs:
