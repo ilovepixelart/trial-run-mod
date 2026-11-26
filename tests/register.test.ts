@@ -109,7 +109,7 @@ describe('register', () => {
       },
     })
 
-    expect(await $.tool.check(check('git push --force origin main'))).toEqual(COURT_FAILED)
+    expect(await $.tool.check(check('git push --force origin main'))).toEqual({ ...COURT_FAILED, plugin: 'trial-run' })
   })
 })
 

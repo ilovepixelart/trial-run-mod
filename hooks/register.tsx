@@ -393,7 +393,7 @@ const VERDICT_LABELS: Record<CourtVerdict['kind'], string> = {
  * A pane's own frame: round where it is docked, none inline, where the
  * engine already frames the pane.
  */
-const framed = (e: { props: { placement: 'dock' | 'inline' } }) => (e.props.placement === 'dock' ? ('round' as const) : undefined)
+const framed = (e: { props: { placement: 'dock' | 'inline' | 'widget' } }) => (e.props.placement === 'dock' ? ('round' as const) : undefined)
 
 const fitted = (text: string, columns: number) =>
   text.length <= columns ? text : `${text.slice(0, Math.max(1, columns - 3)).trimEnd()}...`
